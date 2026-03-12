@@ -39,7 +39,7 @@ async function createWindow(): Promise<void> {
   mainWindow.setMenuBarVisibility(false)
 
   mainWindow.on('close', (e) => {
-    if (tray && !app.isQuitting) {
+    if (tray && !isQuitting) {
       e.preventDefault()
       mainWindow?.hide()
     }
@@ -68,7 +68,7 @@ function createTray(): void {
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show DinoClaw', click: () => { mainWindow?.show(); mainWindow?.focus() } },
     { type: 'separator' },
-    { label: 'Quit', click: () => { app.isQuitting = true; app.quit() } },
+    { label: 'Quit', click: () => { isQuitting = true; app.quit() } },
   ])
 
   tray.setContextMenu(contextMenu)
@@ -168,9 +168,5 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-declare module 'electron' {
-  interface App { isQuitting: boolean }
-}
-
-app.isQuitting = false
-app.on('before-quit', () => { app.isQuitting = true })
+let isQuitting = false
+app.on('before-quit', () => { isQuitting = true })

@@ -32,7 +32,7 @@ import { createStorage, type PersistedState } from './storage'
 import { executeTool, getToolRisk, toolCatalog, setBrowserConfig, setDockerSandbox } from './tools'
 import { Gateway } from './gateway'
 import { ChannelManager } from './channels/manager'
-import { Scheduler, type CronJob } from './scheduler'
+import { Scheduler } from './scheduler'
 import { DockerSandbox } from './docker-runtime'
 import { TunnelManager } from './tunnel'
 import { ServiceManager } from './service'
@@ -378,7 +378,7 @@ export class DinoRuntime {
     return this.workspaceRoot
   }
 
-  async startGateway(port: number): Promise<{ port: number; pairingCode: string }> {
+  async startGateway(_port: number): Promise<{ port: number; pairingCode: string }> {
     return this.gateway.start()
   }
 

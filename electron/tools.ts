@@ -7,7 +7,7 @@ import { z } from 'zod'
 import type { MemoryEntry, ToolCatalogItem, ToolName, MemoryCategory } from '../src/shared/contracts'
 import { browserNavigate, browserSearch, type BrowserConfig, DEFAULT_BROWSER_CONFIG } from './browser-tool'
 import { getHardwareInfo } from './hardware'
-import { DockerSandbox, type DockerConfig, DEFAULT_DOCKER_CONFIG } from './docker-runtime'
+import { DockerSandbox } from './docker-runtime'
 
 const execAsync = promisify(exec)
 

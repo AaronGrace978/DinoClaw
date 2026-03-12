@@ -41,7 +41,7 @@ export class TelegramChannel {
   }
 
   private async verifyBot(): Promise<void> {
-    const res = await this.api('getMe')
+    const res = await this.api('getMe') as { ok?: boolean }
     if (!res.ok) throw new Error(`Telegram bot verification failed: ${JSON.stringify(res)}`)
   }
 

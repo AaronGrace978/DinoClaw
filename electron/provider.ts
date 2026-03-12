@@ -201,14 +201,17 @@ async function callGemini(settings: ModelSettings, messages: ChatMessage[]): Pro
 }
 
 class ProviderError extends Error {
-  constructor(
-    public readonly provider: string,
-    public readonly status: number,
-    public readonly body: string,
-  ) {
+  readonly provider: string
+  readonly status: number
+  readonly body: string
+
+  constructor(provider: string, status: number, body: string) {
     const preview = body.slice(0, 200)
     super(`${provider} returned ${status}: ${preview}`)
     this.name = 'ProviderError'
+    this.provider = provider
+    this.status = status
+    this.body = body
   }
 }
 

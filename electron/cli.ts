@@ -2,7 +2,6 @@
 
 import path from 'node:path'
 import os from 'node:os'
-import fs from 'node:fs'
 import { createStorage } from './storage'
 import { buildSystemPrompt, deriveMood } from './creed'
 import { callModel } from './provider'
@@ -14,8 +13,6 @@ import type {
   MemoryCategory,
   MemoryEntry,
   RunRecord,
-  RunStep,
-  StepKind,
   ToolName,
 } from '../src/shared/contracts'
 

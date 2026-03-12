@@ -35,11 +35,8 @@ import type {
   ModelSettings,
   ModelProvider,
   ApprovalRequest,
-  MemoryCategory,
-  Skill,
   ExecutionMode,
   ToolRisk,
-  TunnelProvider,
 } from './shared/contracts'
 import { PROVIDER_DEFAULTS, OLLAMA_CLOUD_MODELS } from './shared/contracts'
 import CreedPanel from './components/CreedPanel'
@@ -807,7 +804,7 @@ function App() {
                   <span>Status: {store.serviceStatus}</span>
                 </div>
                 <p className="infra-desc">
-                  {process.platform === 'win32'
+                  {navigator.platform.startsWith('Win')
                     ? 'Windows Task Scheduler for auto-start on login.'
                     : 'Systemd user service for background daemon.'}
                 </p>
