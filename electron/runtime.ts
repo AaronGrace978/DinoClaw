@@ -37,6 +37,7 @@ import { DockerSandbox } from './docker-runtime'
 import { TunnelManager } from './tunnel'
 import { ServiceManager } from './service'
 import { DEFAULT_BROWSER_CONFIG } from './browser-tool'
+import { getPlugin, isPluginActive } from './plugin-loader'
 
 const ALL_TOOL_NAMES = toolCatalog.map(t => t.name) as [string, ...string[]]
 
@@ -129,6 +130,8 @@ export class DinoRuntime {
       })),
       browser: this.browserConfig,
       serviceStatus: 'unknown',
+      pluginActive: isPluginActive(),
+      pluginStatus: getPlugin()?.getStatus?.() ?? null,
     }
   }
 
@@ -168,13 +171,29 @@ export class DinoRuntime {
     this.persist()
 
     try {
-      const systemPrompt = buildSystemPrompt({
+      const plugin = getPlugin()
+
+      let pluginPromptExtra = ''
+      if (plugin?.onGoalStart) {
+        const result = await plugin.onGoalStart(goal, request.context)
+        if (result?.promptExtra) pluginPromptExtra = result.promptExtra
+      }
+
+      let systemPrompt = buildSystemPrompt({
         creed: this.state.creed,
         policy: this.state.policy,
         memory: this.state.memory,
         tools: toolCatalog,
         skills: this.state.skills,
       })
+
+      if (pluginPromptExtra) {
+        systemPrompt += '\n\n' + pluginPromptExtra
+      }
+
+      if (plugin?.enrichSystemPrompt) {
+        systemPrompt = await plugin.enrichSystemPrompt(systemPrompt)
+      }
 
       const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
         { role: 'system', content: systemPrompt },
@@ -203,6 +222,10 @@ export class DinoRuntime {
           this.rememberGoalOutcome(run)
           this.persist()
           this.emitNotification('Run Completed', `Goal: ${goal.slice(0, 80)}`)
+
+          if (plugin?.onStepComplete) await plugin.onStepComplete(step).catch(() => {})
+          if (plugin?.onRunEnd) await plugin.onRunEnd(run).catch(() => {})
+
           return { ok: true, run }
         }
 
@@ -272,6 +295,8 @@ export class DinoRuntime {
         const resultStep = createStep('tool_result', `${toolName} completed`, result, toolName, Date.now() - toolStart)
         run.steps.push(resultStep)
         this.emitStreamEvent(run.id, resultStep)
+
+        if (plugin?.onStepComplete) await plugin.onStepComplete(resultStep).catch(() => {})
 
         messages.push(
           { role: 'assistant', content: JSON.stringify(decision) },

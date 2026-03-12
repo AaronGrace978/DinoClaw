@@ -273,6 +273,8 @@ export interface RuntimeSnapshot {
   cronJobs: CronJobInfo[]
   browser: BrowserConfig
   serviceStatus: ServiceStatus
+  pluginActive: boolean
+  pluginStatus: Record<string, unknown> | null
 }
 
 /* ─── IPC Contracts ─────────────────────────────────────── */

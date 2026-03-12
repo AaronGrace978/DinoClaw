@@ -83,6 +83,8 @@ const emptySnapshot: RuntimeSnapshot = {
   cronJobs: [],
   browser: { enabled: false, allowedDomains: [] },
   serviceStatus: 'unknown',
+  pluginActive: false,
+  pluginStatus: null,
 }
 
 export const useDinoStore = create<DinoStore>((set) => ({
