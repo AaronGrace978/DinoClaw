@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="assets/dinoclaw-square-icon.png" alt="DinoClaw" width="120" />
+  <img src="assets/dinoclaw-banner.png" alt="DinoClaw — AI Agent Runtime" width="700" />
 </p>
-
-<h1 align="center">DinoClaw</h1>
 
 <p align="center">
   <strong>AI for the people. Not the portfolio.</strong><br/>
