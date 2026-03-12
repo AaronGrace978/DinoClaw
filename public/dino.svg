@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="cg" x1="16" y1="4" x2="48" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00ffaa"/>
+      <stop offset="100%" stop-color="#00994d"/>
+    </linearGradient>
+  </defs>
+  <!-- Three raptor talons coming down, gripping -->
+  <!-- Left talon -->
+  <path d="M14 8 C14 8, 10 24, 8 34 C6 42, 10 46, 14 42 C18 38, 18 30, 18 24 L14 8Z" fill="url(#cg)"/>
+  <path d="M8 34 C6 40, 2 48, 4 52 C6 54, 10 52, 12 46" fill="url(#cg)"/>
+  <!-- Center talon -->
+  <path d="M30 4 C30 4, 28 22, 28 32 C28 40, 32 44, 36 40 C40 36, 38 28, 36 22 L30 4Z" fill="url(#cg)"/>
+  <path d="M28 32 C26 40, 26 50, 28 54 C30 56, 34 54, 34 48" fill="url(#cg)"/>
+  <!-- Right talon -->
+  <path d="M48 8 C48 8, 50 24, 52 34 C54 42, 50 46, 46 42 C42 38, 44 30, 46 24 L48 8Z" fill="url(#cg)"/>
+  <path d="M52 34 C54 40, 58 48, 56 52 C54 54, 50 52, 48 46" fill="url(#cg)"/>
+  <!-- Palm/pad connecting the talons at top -->
+  <path d="M12 12 C12 12, 20 6, 32 4 C44 6, 50 12, 50 12 C50 14, 44 18, 32 16 C20 18, 12 14, 12 12Z" fill="url(#cg)" opacity="0.85"/>
+</svg>
