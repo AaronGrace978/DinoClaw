@@ -1,15 +1,23 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type {
+  ApprovalRequest,
+  BrowserConfig,
+  ChannelConfig,
+  CronJobInfo,
   DinoCreed,
   ExecutionPolicy,
   MemoryEntry,
   ModelSettings,
+  RunQueueItem,
   RunRecord,
   Skill,
   AuditEntry,
 } from '../src/shared/contracts'
 import { defaultCreed } from './creed'
+import { DEFAULT_BROWSER_CONFIG } from './browser-tool'
+import { DEFAULT_DOCKER_CONFIG, type DockerConfig } from './docker-runtime'
+import { getBuiltInSkillPacks, mergeSkillPacks } from './skills'
 
 export interface PersistedState {
   creed: DinoCreed
@@ -19,6 +27,14 @@ export interface PersistedState {
   runs: RunRecord[]
   skills: Skill[]
   auditLog: AuditEntry[]
+  browser: BrowserConfig
+  runQueue: RunQueueItem[]
+  activeRunId: string | null
+  pendingApprovals: ApprovalRequest[]
+  approvalDecisions: Record<string, boolean>
+  cronJobs: CronJobInfo[]
+  channelConfig: ChannelConfig
+  dockerConfig: DockerConfig
 }
 
 const DEFAULT_STATE: PersistedState = {
@@ -40,8 +56,19 @@ const DEFAULT_STATE: PersistedState = {
   },
   memory: [],
   runs: [],
-  skills: [],
+  skills: getBuiltInSkillPacks(),
   auditLog: [],
+  browser: { ...DEFAULT_BROWSER_CONFIG, requireApprovalForWrites: true },
+  runQueue: [],
+  activeRunId: null,
+  pendingApprovals: [],
+  approvalDecisions: {},
+  cronJobs: [],
+  channelConfig: {
+    telegram: { botToken: '', allowedUsers: [], enabled: false },
+    discord: { botToken: '', allowedUsers: [], enabled: false },
+  },
+  dockerConfig: { ...DEFAULT_DOCKER_CONFIG },
 }
 
 export function createStorage(dataDir: string) {
@@ -62,8 +89,16 @@ export function createStorage(dataDir: string) {
         policy:   parsed.policy   ?? structuredClone(DEFAULT_STATE.policy),
         memory:   parsed.memory   ?? [],
         runs:     parsed.runs     ?? [],
-        skills:   parsed.skills   ?? [],
+        skills:   parsed.skills   ?? structuredClone(DEFAULT_STATE.skills),
         auditLog: parsed.auditLog ?? [],
+        browser:  parsed.browser  ?? structuredClone(DEFAULT_STATE.browser),
+        runQueue: parsed.runQueue ?? [],
+        activeRunId: parsed.activeRunId ?? null,
+        pendingApprovals: parsed.pendingApprovals ?? [],
+        approvalDecisions: parsed.approvalDecisions ?? {},
+        cronJobs: parsed.cronJobs ?? [],
+        channelConfig: parsed.channelConfig ?? structuredClone(DEFAULT_STATE.channelConfig),
+        dockerConfig: parsed.dockerConfig ?? structuredClone(DEFAULT_STATE.dockerConfig),
       })
     } catch {
       return structuredClone(DEFAULT_STATE)
@@ -91,6 +126,9 @@ export function createStorage(dataDir: string) {
 }
 
 function migrate(state: PersistedState): PersistedState {
+  const OLD_DEFAULT_MOTTO = 'AI for the people. Not the portfolio.'
+  const OLD_FALLBACK_MOTTO = 'The pain was not wasted. The pain was research.'
+
   for (const mem of state.memory) {
     if (!mem.category) mem.category = 'fact'
     if (!mem.importance) mem.importance = 3
@@ -100,7 +138,9 @@ function migrate(state: PersistedState): PersistedState {
   }
 
   const creed = state.creed
-  if (!creed.motto) creed.motto = 'The pain was not wasted. The pain was research.'
+  if (!creed.motto || creed.motto === OLD_DEFAULT_MOTTO || creed.motto === OLD_FALLBACK_MOTTO) {
+    creed.motto = DEFAULT_STATE.creed.motto
+  }
   if (!creed.traits) creed.traits = structuredClone(DEFAULT_STATE.creed.traits)
   if (!creed.mood) creed.mood = 'focused'
 
@@ -112,8 +152,48 @@ function migrate(state: PersistedState): PersistedState {
   if (!policy.blockedPaths) policy.blockedPaths = []
   if (!policy.requireApprovalAboveRisk) policy.requireApprovalAboveRisk = 'risky'
 
+  state.skills = mergeSkillPacks(Array.isArray(state.skills) ? state.skills : [])
+
+  if (!state.browser) state.browser = structuredClone(DEFAULT_STATE.browser)
+  if (!state.browser.allowedDomains) state.browser.allowedDomains = []
+  if (typeof state.browser.enabled !== 'boolean') state.browser.enabled = false
+  if (typeof state.browser.requireApprovalForWrites !== 'boolean') state.browser.requireApprovalForWrites = true
+
+  if (!Array.isArray(state.runQueue)) state.runQueue = []
+  for (const item of state.runQueue) {
+    if (!Array.isArray(item.resolvedCheckpoints)) item.resolvedCheckpoints = []
+    if (!item.messages) item.messages = []
+  }
+  if (!state.activeRunId) state.activeRunId = null
+  if (!Array.isArray(state.pendingApprovals)) state.pendingApprovals = []
+  if (!state.approvalDecisions || typeof state.approvalDecisions !== 'object') state.approvalDecisions = {}
+  if (!Array.isArray(state.cronJobs)) state.cronJobs = []
+
+  if (!state.channelConfig) state.channelConfig = structuredClone(DEFAULT_STATE.channelConfig)
+  if (!state.channelConfig.telegram) state.channelConfig.telegram = structuredClone(DEFAULT_STATE.channelConfig.telegram)
+  if (!state.channelConfig.discord) state.channelConfig.discord = structuredClone(DEFAULT_STATE.channelConfig.discord)
+  if (!Array.isArray(state.channelConfig.telegram.allowedUsers)) state.channelConfig.telegram.allowedUsers = []
+  if (!Array.isArray(state.channelConfig.discord.allowedUsers)) state.channelConfig.discord.allowedUsers = []
+
+  if (!state.dockerConfig) state.dockerConfig = structuredClone(DEFAULT_STATE.dockerConfig)
+  if (typeof state.dockerConfig.enabled !== 'boolean') state.dockerConfig.enabled = DEFAULT_STATE.dockerConfig.enabled
+  if (!state.dockerConfig.image) state.dockerConfig.image = DEFAULT_STATE.dockerConfig.image
+  if (!state.dockerConfig.network) state.dockerConfig.network = DEFAULT_STATE.dockerConfig.network
+  if (!state.dockerConfig.memoryLimitMb) state.dockerConfig.memoryLimitMb = DEFAULT_STATE.dockerConfig.memoryLimitMb
+  if (!state.dockerConfig.cpuLimit) state.dockerConfig.cpuLimit = DEFAULT_STATE.dockerConfig.cpuLimit
+  if (typeof state.dockerConfig.readOnlyRootfs !== 'boolean') state.dockerConfig.readOnlyRootfs = DEFAULT_STATE.dockerConfig.readOnlyRootfs
+  if (typeof state.dockerConfig.mountWorkspace !== 'boolean') state.dockerConfig.mountWorkspace = DEFAULT_STATE.dockerConfig.mountWorkspace
+
   for (const run of state.runs) {
     if (!run.toolsUsed) run.toolsUsed = []
+  }
+
+  for (const skill of state.skills) {
+    if (!Array.isArray(skill.triggers)) skill.triggers = []
+    if (!Array.isArray(skill.workflow)) skill.workflow = []
+    if (!Array.isArray(skill.recovery)) skill.recovery = []
+    if (!Array.isArray(skill.outputStyle)) skill.outputStyle = []
+    if (!Array.isArray(skill.examples)) skill.examples = []
   }
 
   return state

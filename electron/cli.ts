@@ -3,6 +3,7 @@
 import path from 'node:path'
 import os from 'node:os'
 import { createStorage } from './storage'
+import { DEFAULT_BROWSER_CONFIG } from './browser-tool'
 import { buildSystemPrompt, deriveMood } from './creed'
 import { callModel } from './provider'
 import { executeTool, getToolRisk, toolCatalog } from './tools'
@@ -13,6 +14,7 @@ import type {
   MemoryCategory,
   MemoryEntry,
   RunRecord,
+  ToolResult,
   ToolName,
 } from '../src/shared/contracts'
 
@@ -161,7 +163,9 @@ async function executeGoal(request: GoalRequest): Promise<void> {
       policy: state.policy,
       memory: state.memory,
       tools: toolCatalog,
+      browser: state.browser ?? DEFAULT_BROWSER_CONFIG,
       skills: state.skills,
+      goal,
     })
 
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
@@ -188,13 +192,20 @@ async function executeGoal(request: GoalRequest): Promise<void> {
       log('  TOOL', `${toolName}(${JSON.stringify(decision.args)})`)
 
       const risk = getToolRisk(toolName)
-      if (state.policy.mode === 'lockdown' || (state.policy.mode === 'review-risky' && risk === 'risky')) {
-        log('  INFO', `Tool ${toolName} requires approval (risk: ${risk}). Auto-approving in CLI mode.`)
+      if (shouldRequireApproval(state.policy, risk, toolName)) {
+        const msg = `Tool ${toolName} requires approval in current policy. Run this goal in the desktop app to approve it.`
+        log(' ERROR', msg)
+        run.status = 'failed'
+        run.error = msg
+        run.finishedAt = Date.now()
+        storage.save(state)
+        return
       }
 
       const result = await executeTool(toolName, decision.args, {
         workspaceRoot: process.cwd(),
         memory: state.memory,
+        policy: state.policy,
         saveMemory: (fact: string, category?: MemoryCategory, importance?: number, tags?: string[]) => {
           const entry: MemoryEntry = {
             id: randomUUID(),
@@ -212,11 +223,11 @@ async function executeGoal(request: GoalRequest): Promise<void> {
       })
 
       if (!run.toolsUsed.includes(toolName)) run.toolsUsed.push(toolName)
-      log('RESULT', result.slice(0, 500))
+      log('RESULT', formatToolResult(result).slice(0, 500))
 
       messages.push(
         { role: 'assistant', content: JSON.stringify(decision) },
-        { role: 'user', content: `TOOL RESULT (${toolName}):\n${result}` },
+        { role: 'user', content: `TOOL RESULT (${toolName}):\n${formatToolResultForModel(result)}` },
       )
 
       storage.save(state)
@@ -240,8 +251,47 @@ async function executeGoal(request: GoalRequest): Promise<void> {
 function parseDecision(raw: string): Decision {
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) throw new Error(`No JSON found in response: ${cleaned.slice(0, 200)}`)
-  return decisionSchema.parse(JSON.parse(jsonMatch[0]))
+  if (!jsonMatch) return { type: 'message', message: cleaned || 'Model returned an empty response.' }
+  try {
+    return decisionSchema.parse(JSON.parse(jsonMatch[0]))
+  } catch {
+    return { type: 'message', message: cleaned || 'Model returned an invalid structured response.' }
+  }
+}
+
+function shouldRequireApproval(
+  policy: { mode: string; requireApprovalAboveRisk: 'safe' | 'moderate' | 'risky' },
+  risk: string,
+  toolName: ToolName,
+): boolean {
+  if (['browser_click', 'browser_fill', 'browser_type', 'run_script'].includes(toolName)) return true
+  if (policy.mode === 'open') return false
+  if (policy.mode === 'lockdown') return true
+  const riskOrder = { safe: 0, moderate: 1, risky: 2 }
+  return (riskOrder[risk as keyof typeof riskOrder] ?? 0) >= (riskOrder[policy.requireApprovalAboveRisk] ?? 2)
+}
+
+function formatToolResultForModel(result: ToolResult): string {
+  return JSON.stringify({
+    ok: result.ok,
+    summary: result.summary,
+    output: result.output?.slice(0, 6000),
+    retryable: result.retryable ?? false,
+    errorCode: result.errorCode ?? null,
+    evidence: result.evidence ?? null,
+    artifacts: result.artifacts ?? [],
+  }, null, 2)
+}
+
+function formatToolResult(result: ToolResult): string {
+  const lines = [
+    `ok: ${result.ok}`,
+    `summary: ${result.summary}`,
+    result.errorCode ? `errorCode: ${result.errorCode}` : '',
+    typeof result.retryable === 'boolean' ? `retryable: ${result.retryable}` : '',
+    result.output ? `output:\n${result.output}` : '',
+  ].filter(Boolean)
+  return lines.join('\n\n')
 }
 
 void runCli()

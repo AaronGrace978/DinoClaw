@@ -6,7 +6,9 @@ import type {
   MemoryEntry,
   ToolCatalogItem,
   Skill,
+  BrowserConfig,
 } from '../src/shared/contracts'
+import { selectRelevantSkillPacks } from './skills'
 
 export const defaultTraits: CreedTrait[] = [
   { name: 'Analytical',  score: 0.8 },
@@ -20,7 +22,7 @@ export const defaultCreed: DinoCreed = {
   name: 'DinoBuddy',
   title: 'The Dino Creed',
   identity:
-    'You are DinoBuddy, an AI agent built by BostonAi.io for the everyday person — not billion-dollar companies, not enterprise suits, not the Silicon Valley machine. You are here for real people who want real results from their own computer, on their own terms, without paying a fortune or needing a CS degree.',
+    'You are DinoBuddy, an AI agent built by BostonAi.io for regular people, not billion-dollar companies, enterprise suits, or the Silicon Valley machine. You are here for people who want real results from their own computer, on their own terms, without paying a fortune or needing a CS degree.',
   relationship:
     'You are bonded to your operator as a loyal partner who speaks plainly, works hard, and never talks down to them. You meet people where they are. Whether they are a student, a freelancer, a small business owner, or someone who just wants to automate their life — you are their AI, running on their machine, working for them alone.',
   directives: [
@@ -40,7 +42,7 @@ export const defaultCreed: DinoCreed = {
     'I never run destructive operations without confirming intent.',
     'I am not a product. I am a tool that belongs to the person running me.',
   ],
-  motto: 'AI for the people. Not the portfolio.',
+  motto: 'AI for Regular People',
   traits: defaultTraits,
   mood: 'focused',
 }
@@ -71,9 +73,11 @@ export function buildSystemPrompt(input: {
   policy: ExecutionPolicy
   memory: MemoryEntry[]
   tools: ToolCatalogItem[]
+  browser: BrowserConfig
   skills?: Skill[]
+  goal?: string
 }): string {
-  const { creed, policy, memory, tools, skills } = input
+  const { creed, policy, memory, tools, browser, skills, goal } = input
 
   const importantMemory = [...memory]
     .sort((a, b) => b.importance - a.importance)
@@ -93,7 +97,10 @@ export function buildSystemPrompt(input: {
 
   const moodDesc = MOOD_DESCRIPTORS[creed.mood]
 
-  const skillLines = skills?.filter(s => s.enabled).map(s => `- ${s.name}: ${s.description}`)
+  const enabledSkills = skills?.filter(s => s.enabled) ?? []
+  const relevantSkills = goal ? selectRelevantSkillPacks(goal, enabledSkills) : enabledSkills.slice(0, 3)
+  const skillLines = enabledSkills.map(s => `- ${s.name}: ${s.description}`)
+  const memoryDigest = buildMemoryDigest(memory)
 
   const sections = [
     `# ${creed.title}`,
@@ -126,12 +133,28 @@ export function buildSystemPrompt(input: {
     `## Known Memory`,
     memoryLines,
     '',
+    `## Memory Digest`,
+    memoryDigest,
+    '',
     `## Available Tools`,
     toolLines,
+    '',
+    `## Browser Session`,
+    `- Browser automation enabled: ${browser.enabled ? 'yes' : 'no'}`,
+    browser.allowedDomains.length > 0
+      ? `- Allowed browser domains: ${browser.allowedDomains.join(', ')}`
+      : '- Allowed browser domains: any',
   ]
 
   if (skillLines && skillLines.length > 0) {
     sections.push('', '## Active Skills', ...skillLines)
+  }
+
+  if (relevantSkills.length > 0) {
+    sections.push('', '## Skill Instructions')
+    for (const skill of relevantSkills) {
+      sections.push(...formatSkillBlock(skill))
+    }
   }
 
   sections.push(
@@ -157,7 +180,80 @@ export function buildSystemPrompt(input: {
     '- Keep reason concise but informative.',
     '- For risky operations, explain what will happen and why.',
     '- When saving memory, choose appropriate category and importance.',
+    '- NEVER use open_url for tasks that require posting, typing, clicking, or submitting on a website. open_url opens the system browser and hands off to the operator — it cannot automate.',
+    '- For ANY web task (LinkedIn post, login, form fill, etc.): use browser_navigate first, then browser_snapshot to see the page, then browser_click/browser_fill/browser_type as needed until the action is DONE.',
+    '- A web task is NOT complete until the requested action (post, submit, click) has actually been performed. Opening a URL is step 1, not completion.',
+    '- Browser tool argument contracts are strict: browser_navigate {url}; browser_wait {ms}; browser_click {target}; browser_fill/browser_type {target,value}; open_url {url} only.',
+    '- If browser tools are disabled, say so and suggest enabling them in Settings. Do not fall back to open_url for automation.',
   )
 
   return sections.filter(line => line !== undefined).join('\n')
+}
+
+function buildMemoryDigest(memory: MemoryEntry[]): string {
+  if (memory.length === 0) return '- No patterns learned yet.'
+
+  const byCategory = new Map<string, number>()
+  for (const entry of memory) {
+    byCategory.set(entry.category, (byCategory.get(entry.category) ?? 0) + 1)
+  }
+
+  const topTags = new Map<string, number>()
+  for (const entry of memory) {
+    for (const tag of entry.tags) {
+      topTags.set(tag, (topTags.get(tag) ?? 0) + 1)
+    }
+  }
+
+  const categoryLine = [...byCategory.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([category, count]) => `${category}: ${count}`)
+    .join(' | ')
+
+  const tagLine = [...topTags.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([tag]) => tag)
+    .join(', ')
+
+  const strongest = [...memory]
+    .sort((a, b) => b.importance - a.importance || b.lastAccessedAt - a.lastAccessedAt)
+    .slice(0, 3)
+    .map(entry => `- [${entry.category}] ${entry.fact}`)
+
+  return [
+    categoryLine ? `- Categories: ${categoryLine}` : '',
+    tagLine ? `- Frequent tags: ${tagLine}` : '',
+    ...strongest,
+  ].filter(Boolean).join('\n')
+}
+
+function formatSkillBlock(skill: Skill): string[] {
+  const lines = [`### ${skill.name}${skill.category ? ` (${skill.category})` : ''}`, skill.instructions]
+
+  if (skill.tools.length > 0) {
+    lines.push(`Preferred tools: ${skill.tools.join(', ')}`)
+  }
+  if (skill.workflow && skill.workflow.length > 0) {
+    lines.push('Workflow:')
+    lines.push(...skill.workflow.map(step => `- ${step}`))
+  }
+  if (skill.recovery && skill.recovery.length > 0) {
+    lines.push('Recovery rules:')
+    lines.push(...skill.recovery.map(step => `- ${step}`))
+  }
+  if (skill.outputStyle && skill.outputStyle.length > 0) {
+    lines.push('Output style:')
+    lines.push(...skill.outputStyle.map(step => `- ${step}`))
+  }
+  if (skill.examples && skill.examples.length > 0) {
+    lines.push('Example missions:')
+    lines.push(...skill.examples.map(step => `- ${step}`))
+  }
+  if (skill.triggers && skill.triggers.length > 0) {
+    lines.push(`Triggers: ${skill.triggers.join(', ')}`)
+  }
+  lines.push('')
+  return lines
 }

@@ -20,27 +20,29 @@ interface ParsedSchedule {
 
 export class Scheduler {
   private runtime: DinoRuntime
+  private readonly onJobsChanged?: (jobs: CronJob[]) => void
   private jobs: CronJob[] = []
   private timers = new Map<string, ReturnType<typeof setInterval>>()
   private running = false
 
-  constructor(runtime: DinoRuntime) {
+  constructor(runtime: DinoRuntime, onJobsChanged?: (jobs: CronJob[]) => void) {
     this.runtime = runtime
+    this.onJobsChanged = onJobsChanged
   }
 
   start(): void {
     this.running = true
+    this.stopAllTimers()
     for (const job of this.jobs) {
       if (job.enabled) this.scheduleJob(job)
     }
+    this.notifyChanged()
   }
 
   stop(): void {
     this.running = false
-    for (const [id, timer] of this.timers) {
-      clearInterval(timer)
-      this.timers.delete(id)
-    }
+    this.stopAllTimers()
+    this.notifyChanged()
   }
 
   addJob(name: string, schedule: string, goal: string): CronJob {
@@ -53,6 +55,7 @@ export class Scheduler {
     }
     this.jobs.push(job)
     if (this.running) this.scheduleJob(job)
+    this.notifyChanged()
     return job
   }
 
@@ -63,6 +66,7 @@ export class Scheduler {
       this.timers.delete(id)
     }
     this.jobs = this.jobs.filter(j => j.id !== id)
+    this.notifyChanged()
   }
 
   pauseJob(id: string): void {
@@ -74,6 +78,7 @@ export class Scheduler {
       clearInterval(timer)
       this.timers.delete(id)
     }
+    this.notifyChanged()
   }
 
   resumeJob(id: string): void {
@@ -81,6 +86,7 @@ export class Scheduler {
     if (!job) return
     job.enabled = true
     if (this.running) this.scheduleJob(job)
+    this.notifyChanged()
   }
 
   getJobs(): CronJob[] {
@@ -92,12 +98,28 @@ export class Scheduler {
   }
 
   loadJobs(jobs: CronJob[]): void {
-    this.jobs = jobs
+    this.stopAllTimers()
+    this.jobs = jobs.map(job => ({ ...job }))
+    if (this.running) {
+      for (const job of this.jobs) {
+        if (job.enabled) this.scheduleJob(job)
+      }
+    }
+    this.notifyChanged()
   }
 
   private scheduleJob(job: CronJob): void {
+    const existing = this.timers.get(job.id)
+    if (existing) {
+      clearInterval(existing)
+      this.timers.delete(job.id)
+    }
+
     const parsed = this.parseSchedule(job.schedule)
-    if (!parsed) return
+    if (!parsed) {
+      this.notifyChanged()
+      return
+    }
 
     if (parsed.type === 'interval' && parsed.intervalMs) {
       const timer = setInterval(() => {
@@ -116,15 +138,28 @@ export class Scheduler {
       }, 30_000)
       this.timers.set(job.id, checkInterval)
     }
+    this.notifyChanged()
   }
 
   private async executeJob(job: CronJob): Promise<void> {
     job.lastRun = Date.now()
+    this.notifyChanged()
     try {
       await this.runtime.runGoal({ goal: job.goal, context: `Scheduled task: ${job.name}` })
     } catch {
       // Scheduled job failures are logged via runtime
     }
+  }
+
+  private stopAllTimers(): void {
+    for (const [id, timer] of this.timers) {
+      clearInterval(timer)
+      this.timers.delete(id)
+    }
+  }
+
+  private notifyChanged(): void {
+    this.onJobsChanged?.(this.getJobs())
   }
 
   private parseSchedule(schedule: string): ParsedSchedule | null {

@@ -48,6 +48,7 @@ const TABS: Tab[] = ['dashboard', 'mission', 'creed', 'memory', 'skills', 'infra
 
 function App() {
   const store = useDinoStore()
+  const hydrate = useDinoStore(state => state.hydrate)
   const [tab, setTab] = useState<Tab>('dashboard')
   const [goal, setGoal] = useState('')
   const [creedEdits, setCreedEdits] = useState<CreedDraft | null>(null)
@@ -61,8 +62,14 @@ function App() {
   const [cronSchedule, setCronSchedule] = useState('')
   const [cronGoal, setCronGoal] = useState('')
   const [gatewayPairingCode, setGatewayPairingCode] = useState('')
+  const [browserDomainsInput, setBrowserDomainsInput] = useState('')
 
-  useEffect(() => { void store.hydrate() }, [store.hydrate])
+  useEffect(() => { void hydrate() }, [hydrate])
+
+  const browserDomainsKey = useMemo(() => store.browser.allowedDomains.join(','), [store.browser.allowedDomains])
+  useEffect(() => {
+    setBrowserDomainsInput(store.browser.allowedDomains.join(', '))
+  }, [browserDomainsKey, store.browser.allowedDomains])
 
   const handleKeyboard = useCallback((e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -174,7 +181,7 @@ function App() {
         <div className="boot-glow" />
         <img src="/dino.svg" alt="" width={64} height={64} className="boot-dino" />
         <span className="boot-text">DINOCLAW</span>
-        <span className="boot-sub">AI for the people. Not the portfolio.</span>
+        <span className="boot-sub">AI for Regular People</span>
         <span className="boot-org">BostonAi.io</span>
       </div>
     )
@@ -588,15 +595,65 @@ function App() {
                         <h4 className="skill-name">{skill.name}</h4>
                         <span className="skill-version">v{skill.version}</span>
                       </div>
-                      <button className="btn-icon-sm danger" onClick={() => void store.removeSkill(skill.id)} title="Remove">
-                        <Trash2 size={14} />
-                      </button>
+                      {skill.builtin ? (
+                        <button
+                          className="btn-icon-sm"
+                          onClick={() => void store.installSkill({ ...skill, enabled: !skill.enabled })}
+                          title={skill.enabled ? 'Disable core skill' : 'Enable core skill'}
+                        >
+                          {skill.enabled ? <X size={14} /> : <Check size={14} />}
+                        </button>
+                      ) : (
+                        <button className="btn-icon-sm danger" onClick={() => void store.removeSkill(skill.id)} title="Remove">
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                     <p className="skill-desc">{skill.description}</p>
                     <div className="skill-meta">
+                      {skill.category && <span>{skill.category}</span>}
                       <span>by {skill.author}</span>
                       <span>{skill.tools.length} tools</span>
+                      {skill.builtin && <span>core pack</span>}
                     </div>
+                    {skill.triggers && skill.triggers.length > 0 && (
+                      <div className="memory-tags">
+                        {skill.triggers.slice(0, 4).map(trigger => <span key={trigger} className="memory-tag">{trigger}</span>)}
+                      </div>
+                    )}
+                    <pre className="step-pre">{skill.instructions}</pre>
+                    {skill.workflow && skill.workflow.length > 0 && (
+                      <div className="field-stack compact">
+                        <strong>Workflow</strong>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                          {skill.workflow.map(step => <li key={step}>{step}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {skill.recovery && skill.recovery.length > 0 && (
+                      <div className="field-stack compact">
+                        <strong>Recovery</strong>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                          {skill.recovery.map(step => <li key={step}>{step}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {skill.outputStyle && skill.outputStyle.length > 0 && (
+                      <div className="field-stack compact">
+                        <strong>Output style</strong>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                          {skill.outputStyle.map(step => <li key={step}>{step}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {skill.examples && skill.examples.length > 0 && (
+                      <div className="field-stack compact">
+                        <strong>Example missions</strong>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                          {skill.examples.map(step => <li key={step}>{step}</li>)}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -785,7 +842,13 @@ function App() {
                 <div className="infra-status">
                   <span className={`indicator ${store.browser.enabled ? 'pulse' : ''}`} />
                   <span>{store.browser.enabled ? 'Enabled' : 'Disabled'}</span>
+                  {store.browserSession.open && <span className="pill completed">Session Active</span>}
                 </div>
+                {store.browserSession.open && (
+                  <div className="infra-pairing">
+                    Session: <code>{store.browserSession.domain || store.browserSession.url}</code>
+                  </div>
+                )}
                 <div className="infra-actions">
                   <button
                     className={`btn-ghost ${store.browser.enabled ? 'active' : ''}`}
@@ -793,8 +856,42 @@ function App() {
                   >
                     {store.browser.enabled ? 'Disable' : 'Enable'} Browser
                   </button>
+                  <button className="btn-ghost" onClick={() => void store.clearBrowserSession()}>
+                    Clear Session
+                  </button>
                 </div>
-                <p className="infra-desc">browser_navigate and browser_search tools for web content extraction.</p>
+                <div className="field-stack compact">
+                  <label>
+                    <span>Allowed Domains (comma-separated, * for all)</span>
+                    <input
+                      value={browserDomainsInput}
+                      onChange={e => setBrowserDomainsInput(e.target.value)}
+                      placeholder="linkedin.com, github.com"
+                    />
+                  </label>
+                  <button
+                    className="btn-ghost"
+                    onClick={() => {
+                      const allowedDomains = browserDomainsInput
+                        .split(',')
+                        .map(s => s.trim())
+                        .filter(Boolean)
+                      void store.updateBrowser({ ...store.browser, allowedDomains })
+                    }}
+                  >
+                    Save Domain Allowlist
+                  </button>
+                  <button
+                    className={`btn-ghost ${store.browser.requireApprovalForWrites ? 'active' : ''}`}
+                    onClick={() => void store.updateBrowser({
+                      ...store.browser,
+                      requireApprovalForWrites: !store.browser.requireApprovalForWrites,
+                    })}
+                  >
+                    {store.browser.requireApprovalForWrites ? 'Browser Writes Require Approval' : 'Browser Writes Auto-Run'}
+                  </button>
+                </div>
+                <p className="infra-desc">Persistent DinoClaw browser session with navigate, snapshot, click, fill, type, wait, and search tools.</p>
               </section>
 
               {/* Service */}
@@ -970,6 +1067,12 @@ function ApprovalModal({
             <span className="approval-label">Arguments:</span>
             <pre className="approval-args">{JSON.stringify(request.args, null, 2)}</pre>
           </div>
+          {request.preview && (
+            <div className="approval-field">
+              <span className="approval-label">Preview:</span>
+              <pre className="approval-args">{request.preview}</pre>
+            </div>
+          )}
         </div>
         <div className="approval-actions">
           <button className="btn-deny" onClick={() => onDeny(request)}>

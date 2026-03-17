@@ -13,11 +13,32 @@ import type {
 import { DinoRuntime } from './runtime'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const isDaemon = process.argv.includes('--daemon')
+const sessionDataPath = path.join(app.getPath('temp'), 'dinoclaw-session-data')
+const DEV_LOAD_RETRIES = 20
+const DEV_LOAD_RETRY_DELAY_MS = 250
+app.setPath('sessionData', sessionDataPath)
+app.commandLine.appendSwitch('disk-cache-dir', path.join(sessionDataPath, 'cache'))
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
+
+const singleInstance = app.requestSingleInstanceLock()
+if (!singleInstance) {
+  app.quit()
+}
 
 const runtime = new DinoRuntime()
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+let isQuitting = false
+
+app.on('second-instance', () => {
+  if (isDaemon) return
+  if (!mainWindow) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+})
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -45,11 +66,13 @@ async function createWindow(): Promise<void> {
     }
   })
 
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL
-  if (devServerUrl) {
-    await mainWindow.loadURL(devServerUrl)
-  } else {
-    await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL
+  try {
+    await loadRenderer(mainWindow, devServerUrl)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown renderer load error'
+    console.error(`[main] Failed to load renderer: ${message}`)
+    await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderBootstrapErrorHtml(message))}`)
   }
 }
 
@@ -140,16 +163,22 @@ app.whenReady().then(async () => {
 
   // Docker
   ipcMain.handle('dinoclaw:updateDocker', (_e, config: Record<string, unknown>) =>
-    runtime.docker.updateConfig(config))
+    runtime.updateDockerConfig(config))
 
   // Browser
   ipcMain.handle('dinoclaw:updateBrowser', (_e, config: BrowserConfig) =>
     runtime.updateBrowserConfig(config))
+  ipcMain.handle('dinoclaw:getBrowserSession', () => runtime.getBrowserSessionInfo())
+  ipcMain.handle('dinoclaw:clearBrowserSession', () => runtime.clearBrowserSession())
 
   // Service
   ipcMain.handle('dinoclaw:getServiceStatus', () => runtime.getServiceStatus())
   ipcMain.handle('dinoclaw:installService', () => runtime.installService())
   ipcMain.handle('dinoclaw:uninstallService', () => runtime.uninstallService())
+
+  if (isDaemon) {
+    return
+  }
 
   createTray()
   await createWindow()
@@ -165,8 +194,70 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  if (isDaemon) return
   if (process.platform !== 'darwin') app.quit()
 })
 
-let isQuitting = false
 app.on('before-quit', () => { isQuitting = true })
+
+async function loadRenderer(win: BrowserWindow, devServerUrl?: string): Promise<void> {
+  if (!devServerUrl) {
+    await win.loadFile(path.join(__dirname, '../dist/index.html'))
+    return
+  }
+
+  const target = normalizeDevServerUrl(devServerUrl)
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= DEV_LOAD_RETRIES; attempt++) {
+    try {
+      await win.loadURL(target)
+      return
+    } catch (error) {
+      lastError = error
+      const message = error instanceof Error ? error.message : String(error)
+      const retryable = /ERR_FAILED|ERR_CONNECTION_REFUSED|ERR_ABORTED|ERR_TIMED_OUT/i.test(message)
+      if (!retryable || attempt === DEV_LOAD_RETRIES) break
+      await delay(DEV_LOAD_RETRY_DELAY_MS)
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`Unable to load renderer URL: ${target}`)
+}
+
+function normalizeDevServerUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    if (!parsed.pathname) {
+      parsed.pathname = '/'
+    }
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
+function renderBootstrapErrorHtml(message: string): string {
+  return [
+    '<!doctype html>',
+    '<html>',
+    '<head><meta charset="utf-8"><title>DinoClaw - Startup Error</title></head>',
+    '<body style="background:#0c1118;color:#e5ebff;font-family:Segoe UI,Arial,sans-serif;padding:24px;line-height:1.45;">',
+    '<h2 style="margin-top:0;">DinoClaw could not load the UI.</h2>',
+    '<p>This is usually a temporary dev-server startup race. Keep the terminal open and retry.</p>',
+    `<pre style="white-space:pre-wrap;background:#111826;padding:12px;border-radius:8px;">${escapeHtml(message)}</pre>`,
+    '</body>',
+    '</html>',
+  ].join('')
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}

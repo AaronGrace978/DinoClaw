@@ -53,6 +53,7 @@ export type ToolName =
   | 'write_file'
   | 'delete_file'
   | 'execute_command'
+  | 'run_script'
   | 'open_url'
   | 'web_fetch'
   | 'save_memory'
@@ -63,6 +64,13 @@ export type ToolName =
   | 'code_search'
   | 'system_info'
   | 'browser_navigate'
+  | 'browser_snapshot'
+  | 'browser_click'
+  | 'browser_fill'
+  | 'browser_type'
+  | 'browser_wait'
+  | 'browser_close'
+  | 'browser_screenshot'
   | 'browser_search'
   | 'hardware_info'
   | 'docker_exec'
@@ -132,6 +140,21 @@ export interface ToolCatalogItem {
   description: string
 }
 
+export interface ToolArtifact {
+  path: string
+  description?: string
+}
+
+export interface ToolResult {
+  ok: boolean
+  summary: string
+  output?: string
+  retryable?: boolean
+  errorCode?: string
+  evidence?: Record<string, unknown>
+  artifacts?: ToolArtifact[]
+}
+
 /* ─── Runs ──────────────────────────────────────────────── */
 
 export type StepKind = 'planning' | 'thought' | 'tool' | 'tool_result' | 'reflection' | 'approval_needed' | 'approved' | 'denied' | 'final' | 'error'
@@ -149,7 +172,7 @@ export interface RunStep {
 export interface RunRecord {
   id: string
   goal: string
-  status: 'idle' | 'running' | 'awaiting_approval' | 'completed' | 'failed'
+  status: 'idle' | 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed'
   startedAt: number
   finishedAt?: number
   finalMessage?: string
@@ -170,6 +193,13 @@ export interface Skill {
   instructions: string
   tools: ToolName[]
   enabled: boolean
+  builtin?: boolean
+  triggers?: string[]
+  category?: string
+  workflow?: string[]
+  recovery?: string[]
+  outputStyle?: string[]
+  examples?: string[]
 }
 
 /* ─── Audit Log ─────────────────────────────────────────── */
@@ -248,6 +278,14 @@ export interface CronJobInfo {
 export interface BrowserConfig {
   enabled: boolean
   allowedDomains: string[]
+  requireApprovalForWrites: boolean
+}
+
+export interface BrowserSessionInfo {
+  open: boolean
+  url: string
+  title: string
+  domain: string
 }
 
 /* ─── Service ───────────────────────────────────────────── */
@@ -272,9 +310,13 @@ export interface RuntimeSnapshot {
   tunnel: TunnelStatus
   cronJobs: CronJobInfo[]
   browser: BrowserConfig
+  browserSession: BrowserSessionInfo
   serviceStatus: ServiceStatus
   pluginActive: boolean
   pluginStatus: Record<string, unknown> | null
+  queueDepth: number
+  activeRunId: string | null
+  pendingApprovals: ApprovalRequest[]
 }
 
 /* ─── IPC Contracts ─────────────────────────────────────── */
@@ -297,6 +339,28 @@ export interface ApprovalRequest {
   risk: ToolRisk
   reason: string
   args: Record<string, unknown>
+  preview?: string
+  kind?: 'tool' | 'browser_checkpoint'
+  checkpointType?: 'login_required' | 'captcha_required' | 'resume_browser_flow' | 'browser_blocked'
+  title?: string
+}
+
+export interface RunMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export interface RunQueueItem {
+  id: string
+  runId: string
+  goal: string
+  context?: string
+  stepIndex: number
+  messages: RunMessage[]
+  awaitingApprovalStepId?: string
+  resolvedCheckpoints: string[]
+  createdAt: number
+  updatedAt: number
 }
 
 export interface StreamEvent {
@@ -335,6 +399,8 @@ export interface DinoClawApi {
   stopTunnel: () => Promise<void>
   updateDocker: (config: Partial<DockerStatus>) => Promise<void>
   updateBrowser: (config: BrowserConfig) => Promise<void>
+  getBrowserSession: () => Promise<BrowserSessionInfo>
+  clearBrowserSession: () => Promise<void>
   getServiceStatus: () => Promise<ServiceStatus>
   installService: () => Promise<string>
   uninstallService: () => Promise<string>

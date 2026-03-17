@@ -1,6 +1,8 @@
 import type { RunStep, RunRecord } from '../src/shared/contracts'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 export interface PluginHooks {
   onGoalStart?(goal: string, context?: string): Promise<{ promptExtra?: string }>
@@ -18,6 +20,9 @@ const SEARCH_PATHS = [
   '../../../SoulFrame/dist/index.js',
 ]
 
+const require = createRequire(import.meta.url)
+const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+
 let loadedPlugin: PluginHooks | null = null
 let pluginLoaded = false
 
@@ -26,35 +31,36 @@ export function getPlugin(): PluginHooks | null {
   pluginLoaded = true
 
   for (const relative of SEARCH_PATHS) {
-    const absolute = path.resolve(__dirname, relative)
-    if (fs.existsSync(absolute)) {
-      try {
-        const mod = require(absolute) as { default?: PluginHooks; create?: () => PluginHooks }
-        loadedPlugin = mod.default ?? mod.create?.() ?? null
-        if (loadedPlugin) {
-          console.log(`[plugin-loader] Plugin loaded from ${absolute}`)
-          return loadedPlugin
-        }
-      } catch (err) {
-        console.warn(`[plugin-loader] Failed to load plugin from ${absolute}:`, err)
-      }
+    const absolute = path.resolve(moduleDir, relative)
+    const plugin = loadPlugin(absolute)
+    if (plugin) {
+      loadedPlugin = plugin
+      console.log(`[plugin-loader] Plugin loaded from ${absolute}`)
+      return loadedPlugin
     }
   }
 
   const envPath = process.env.DINOCLAW_PLUGIN_PATH
   if (envPath && fs.existsSync(envPath)) {
-    try {
-      const mod = require(envPath) as { default?: PluginHooks; create?: () => PluginHooks }
-      loadedPlugin = mod.default ?? mod.create?.() ?? null
-      if (loadedPlugin) {
-        console.log(`[plugin-loader] Plugin loaded from env path: ${envPath}`)
-      }
-    } catch (err) {
-      console.warn(`[plugin-loader] Failed to load plugin from env path:`, err)
+    const plugin = loadPlugin(envPath)
+    if (plugin) {
+      loadedPlugin = plugin
+      console.log(`[plugin-loader] Plugin loaded from env path: ${envPath}`)
     }
   }
 
   return loadedPlugin
+}
+
+function loadPlugin(absolutePath: string): PluginHooks | null {
+  if (!fs.existsSync(absolutePath)) return null
+  try {
+    const mod = require(absolutePath) as { default?: PluginHooks; create?: () => PluginHooks }
+    return mod.default ?? mod.create?.() ?? null
+  } catch (err) {
+    console.warn(`[plugin-loader] Failed to load plugin from ${absolutePath}:`, err)
+    return null
+  }
 }
 
 export function isPluginActive(): boolean {

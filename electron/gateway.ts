@@ -27,7 +27,10 @@ export class Gateway {
     this.config = { ...DEFAULT_CONFIG, ...config }
   }
 
-  start(): Promise<{ port: number; pairingCode: string }> {
+  start(port?: number): Promise<{ port: number; pairingCode: string }> {
+    if (typeof port === 'number' && Number.isFinite(port) && port > 0) {
+      this.config.port = Math.trunc(port)
+    }
     this.pairingCode = String(Math.floor(100000 + Math.random() * 900000))
     this.bearerToken = ''
 

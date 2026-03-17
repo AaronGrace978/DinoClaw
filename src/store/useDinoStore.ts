@@ -52,6 +52,7 @@ interface DinoStore extends RuntimeSnapshot {
   startTunnel: (provider: TunnelProvider, port: number, ngrokToken?: string) => Promise<string | null>
   stopTunnel: () => Promise<void>
   updateBrowser: (config: BrowserConfig) => Promise<void>
+  clearBrowserSession: () => Promise<void>
   clearError: () => void
 }
 
@@ -81,10 +82,14 @@ const emptySnapshot: RuntimeSnapshot = {
   docker: { enabled: false, available: false, image: 'alpine:3.20', network: 'none' },
   tunnel: { provider: 'none', running: false, url: '' },
   cronJobs: [],
-  browser: { enabled: false, allowedDomains: [] },
+  browser: { enabled: false, allowedDomains: [], requireApprovalForWrites: true },
+  browserSession: { open: false, url: '', title: '', domain: '' },
   serviceStatus: 'unknown',
   pluginActive: false,
   pluginStatus: null,
+  queueDepth: 0,
+  activeRunId: null,
+  pendingApprovals: [],
 }
 
 export const useDinoStore = create<DinoStore>((set) => ({
@@ -104,7 +109,7 @@ export const useDinoStore = create<DinoStore>((set) => ({
       if (!window.dinoClaw) { set({ isLoading: false }); return }
       const snapshot = await window.dinoClaw.getSnapshot()
       const workspace = await window.dinoClaw.getWorkspace()
-      set({ ...snapshot, isLoading: false, workspace })
+      set({ ...snapshot, isLoading: false, workspace, approvalQueue: snapshot.pendingApprovals ?? [] })
 
       window.dinoClaw.onStreamEvent((event) => {
         set(state => ({ liveSteps: [...state.liveSteps, event] }))
@@ -269,6 +274,12 @@ export const useDinoStore = create<DinoStore>((set) => ({
 
   updateBrowser: async (config) => {
     await window.dinoClaw.updateBrowser(config)
+    const snapshot = await window.dinoClaw.getSnapshot()
+    set({ ...snapshot })
+  },
+
+  clearBrowserSession: async () => {
+    await window.dinoClaw.clearBrowserSession()
     const snapshot = await window.dinoClaw.getSnapshot()
     set({ ...snapshot })
   },

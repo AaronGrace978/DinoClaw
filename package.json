@@ -1,7 +1,7 @@
 {
   "name": "dinoclaw",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "AI for the people. Desktop AI agent by BostonAi.io",
   "author": "BostonAi.io <hello@bostonai.io>",
   "homepage": "https://bostonai.io",
@@ -9,9 +9,11 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "dev": "vite",
     "build": "tsc -b && vite build",
     "dist": "npm run build && electron-builder",
+    "dist:portable": "npm run build && electron-builder --win portable",
+    "dist:nsis": "npm run build && electron-builder --win nsis",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b",

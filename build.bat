@@ -42,8 +42,8 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [PACK]  Packaging with electron-builder...
-call npx electron-builder
+echo [PACK]  Packaging portable target with electron-builder...
+call npx electron-builder --win portable
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Packaging failed. Check the output above.
