@@ -128,6 +128,7 @@ export function createStorage(dataDir: string) {
 function migrate(state: PersistedState): PersistedState {
   const OLD_DEFAULT_MOTTO = 'AI for the people. Not the portfolio.'
   const OLD_FALLBACK_MOTTO = 'The pain was not wasted. The pain was research.'
+  const OLD_CORPORATE_MOTTO = 'AI for Regular People'
 
   for (const mem of state.memory) {
     if (!mem.category) mem.category = 'fact'
@@ -138,7 +139,7 @@ function migrate(state: PersistedState): PersistedState {
   }
 
   const creed = state.creed
-  if (!creed.motto || creed.motto === OLD_DEFAULT_MOTTO || creed.motto === OLD_FALLBACK_MOTTO) {
+  if (!creed.motto || creed.motto === OLD_DEFAULT_MOTTO || creed.motto === OLD_FALLBACK_MOTTO || creed.motto === OLD_CORPORATE_MOTTO) {
     creed.motto = DEFAULT_STATE.creed.motto
   }
   if (!creed.traits) creed.traits = structuredClone(DEFAULT_STATE.creed.traits)

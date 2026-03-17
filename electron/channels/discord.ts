@@ -35,8 +35,14 @@ export class DiscordChannel {
 
   async start(): Promise<void> {
     this.running = true
-    const gateway = await this.getGatewayUrl()
-    this.connect(gateway)
+    try {
+      const gateway = await this.getGatewayUrl()
+      this.connect(gateway)
+    } catch (err) {
+      console.error('[Discord] Failed to start:', err instanceof Error ? err.message : err)
+      this.running = false
+      throw err
+    }
   }
 
   stop(): void {
@@ -54,7 +60,11 @@ export class DiscordChannel {
     const res = await fetch('https://discord.com/api/v10/gateway', {
       headers: { Authorization: `Bot ${this.config.botToken}` },
     })
-    const data = (await res.json()) as { url: string }
+    const data = (await res.json()) as { url?: string; message?: string; code?: number }
+    if (!data.url) {
+      const msg = data.message ?? `Discord API error ${data.code ?? res.status}`
+      throw new Error(msg)
+    }
     return data.url + '?v=10&encoding=json'
   }
 
@@ -124,11 +134,14 @@ export class DiscordChannel {
   private async handleMessage(msg: DiscordMessage): Promise<void> {
     if (msg.author.bot) return
 
-    if (this.config.allowedUsers.length > 0 &&
-        !this.config.allowedUsers.includes('*') &&
-        !this.config.allowedUsers.includes(msg.author.id) &&
-        !this.config.allowedUsers.includes(msg.author.username)) {
-      return
+    const authorId = msg.author.id
+    const authorName = (msg.author.username ?? '').toLowerCase()
+    const allowed = this.config.allowedUsers
+    if (allowed.length > 0 && !allowed.includes('*')) {
+      const match = allowed.some(
+        a => a === authorId || a.toLowerCase() === authorName
+      )
+      if (!match) return
     }
 
     const content = msg.content.trim()
@@ -148,6 +161,7 @@ export class DiscordChannel {
         : `Error: ${result.error}`
       await this.reply(msg.channel_id, reply.slice(0, 2000))
     } catch (err) {
+      console.error('[Discord] Goal failed:', err)
       await this.reply(msg.channel_id, `Error: ${err instanceof Error ? err.message : 'Unknown'}`)
     }
   }

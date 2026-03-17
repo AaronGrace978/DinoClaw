@@ -751,7 +751,7 @@ function App() {
                 {!store.channels.discord.enabled ? (
                   <div className="field-stack compact">
                     <input placeholder="Bot Token" value={discordToken} onChange={e => setDiscordToken(e.target.value)} />
-                    <input placeholder="Allowed users (comma-sep, or * for all)" value={discordUsers} onChange={e => setDiscordUsers(e.target.value)} />
+                    <input placeholder="Allowed users: * for all, or your username" value={discordUsers} onChange={e => setDiscordUsers(e.target.value)} />
                     <button className="btn-primary" onClick={() => {
                       if (discordToken.trim()) void store.startDiscord(discordToken.trim(), discordUsers.split(',').map(s => s.trim()).filter(Boolean))
                     }}>
