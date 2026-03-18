@@ -154,16 +154,49 @@ export class DiscordChannel {
       return
     }
 
+    // Show "DinoClaw is typing..." so users know we're working (typing lasts ~10s, refresh every 8s)
+    const typingInterval = setInterval(() => {
+      void this.triggerTyping(msg.channel_id)
+    }, 8000)
+    void this.triggerTyping(msg.channel_id)
+
     try {
       const result = await this.runtime.runGoal({ goal: content })
       const reply = result.ok
         ? result.run.finalMessage ?? 'Done.'
-        : `Error: ${result.error}`
+        : this.friendlyError(result.error)
       await this.reply(msg.channel_id, reply.slice(0, 2000))
     } catch (err) {
       console.error('[Discord] Goal failed:', err)
-      await this.reply(msg.channel_id, `Error: ${err instanceof Error ? err.message : 'Unknown'}`)
+      const friendly = this.friendlyError(err instanceof Error ? err.message : 'Unknown')
+      await this.reply(msg.channel_id, friendly)
+    } finally {
+      clearInterval(typingInterval)
     }
+  }
+
+  private async triggerTyping(channelId: string): Promise<void> {
+    try {
+      await fetch(`https://discord.com/api/v10/channels/${channelId}/typing`, {
+        method: 'POST',
+        headers: { Authorization: `Bot ${this.config.botToken}` },
+      })
+    } catch {
+      // Ignore typing API errors
+    }
+  }
+
+  private friendlyError(raw: string): string {
+    if (raw.includes('timeout') || raw.includes('Timeout')) {
+      return '🦖 *tiny dino arms flail* Oops! That took too long — try again? I might have been waiting on something.'
+    }
+    if (raw.includes('401') || raw.includes('unauthorized')) {
+      return '🦖 Hmm, my model connection isn\'t authorized. Check Settings → Model (API key, provider).'
+    }
+    if (raw.includes('approval') || raw.includes('denied')) {
+      return '🦖 I needed your approval for that, but you weren\'t at the DinoClaw app — try from the desktop when you need risky actions!'
+    }
+    return `🦖 *tilts head* Something went wrong: ${raw.slice(0, 200)}. Try again?`
   }
 
   private async reply(channelId: string, content: string): Promise<void> {
