@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.0-00e68a?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-0.4.0-00e68a?style=flat-square" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Mac%20%7C%20Linux-333?style=flat-square" />
   <img src="https://img.shields.io/badge/by-BostonAi.io-00e68a?style=flat-square" />
@@ -25,7 +25,7 @@ The freelancer. The student. The small business owner. The curious tinkerer who 
 
 - Runs on your computer — no cloud, no server, no DevOps
 - Has a real UI — not a terminal, not a chat widget, a full desktop app
-- Does real work — files, commands, web searches, git, automation
+- Does real work — files, commands, web searches, git, browser automation, desktop copilot
 - Remembers you — persistent memory that learns your preferences
 - Has personality — the Dino Creed system gives your agent a soul
 - Connects everywhere — Telegram, Discord, webhooks, scheduled tasks
@@ -93,7 +93,13 @@ That's it. No terminal. No config files. No Docker. No Kubernetes. No monthly bi
 ## Features
 
 ### Desktop App
-Full Electron desktop application with a 7-tab UI — Dashboard, Mission, Creed, Memory, Skills, Infrastructure, Settings. Real-time streaming shows you every step the agent takes. Approval modals with countdown timers for risky operations. System tray support. Keyboard shortcuts.
+Full Electron desktop application with a 7-tab UI — Dashboard, Mission, Creed, Memory, Skills, Infrastructure, Settings. Real-time streaming shows you every step the agent takes. Approval modals with countdown timers for risky operations. **Stop button** to cancel a running mission. System tray support. Keyboard shortcuts.
+
+### Conversation Register (from Pantheon)
+DinoClaw detects whether you're sharing something personal, playing around, or asking for real work — and adjusts automatically. Personal moments get warmth and presence, not task suggestions. Playful banter stays fun. Missions get full tool power.
+
+### Desktop Copilot (Windows)
+Opt-in OS-level automation: launch apps, focus windows, move the mouse, click, type, hotkeys, scroll, and capture screenshots. Enable **Desktop automation** in Settings. Ideal for "open Notepad and type this" or Normandy-style app control. Mac/Linux support planned.
 
 ### The Dino Creed
 The Creed is DinoClaw's soul. It defines who the agent is, how it relates to you, and what it will never do. Fully editable from the UI.
@@ -110,7 +116,9 @@ The Creed is DinoClaw's soul. It defines who the agent is, how it relates to you
 
 Default motto: **"AI for the people. Not the portfolio."**
 
-### 18 Built-in Tools
+### 41 Built-in Tools
+
+**Files & Shell**
 
 | Tool | Risk | What it does |
 |------|------|-------------|
@@ -119,18 +127,48 @@ Default motto: **"AI for the people. Not the portfolio."**
 | `write_file` | Moderate | Write or overwrite files |
 | `delete_file` | Risky | Delete a file |
 | `execute_command` | Risky | Run shell commands |
-| `open_url` | Moderate | Open URL in browser |
-| `web_fetch` | Safe | Fetch web page content |
-| `save_memory` | Safe | Store a durable memory |
-| `recall_memory` | Safe | Search stored memories |
-| `git_status` | Safe | Git repository status |
-| `git_log` | Safe | Recent git commits |
-| `git_diff` | Safe | Git diff output |
+| `run_script` | Risky | Write and optionally run scripts (Docker sandbox optional) |
 | `code_search` | Safe | Regex search across files |
-| `system_info` | Safe | OS, CPU, memory info |
-| `browser_navigate` | Moderate | Navigate + extract page content |
+| `open_file_external` | Moderate | Open a file with the default app |
+| `reveal_in_explorer` | Moderate | Highlight a file in the file manager |
+
+**Web & Browser**
+
+| Tool | Risk | What it does |
+|------|------|-------------|
+| `open_url` | Moderate | Open URL in system browser (handoff only) |
+| `web_fetch` | Safe | Fetch web page content |
+| `browser_navigate` | Moderate | Navigate in the DinoClaw browser session |
+| `browser_snapshot` | Safe | Capture current page state |
+| `browser_click` | Risky | Click an element |
+| `browser_fill` / `browser_type` | Risky | Fill or append text in inputs |
+| `browser_wait` | Safe | Wait and capture state |
+| `browser_screenshot` | Safe | Screenshot the browser page |
 | `browser_search` | Safe | Web search via DuckDuckGo |
-| `hardware_info` | Safe | Detailed hardware + USB + disks |
+| `browser_close` | Safe | Close the browser session |
+
+**Desktop Copilot (Windows, opt-in)**
+
+| Tool | Risk | What it does |
+|------|------|-------------|
+| `desktop_open_app` | Risky | Launch a desktop application |
+| `desktop_wait_for_window` | Safe | Wait for a window to appear |
+| `desktop_focus_window` | Risky | Focus a window by title/process |
+| `desktop_list_windows` | Safe | List visible windows |
+| `desktop_screenshot` | Moderate | Capture full desktop screenshot |
+| `desktop_mouse_move` / `desktop_click` | Risky | Move cursor and click |
+| `desktop_type_text` | Risky | Type into the focused control |
+| `desktop_press_key` / `desktop_hotkey` | Risky | Send keys and shortcuts |
+| `desktop_scroll` | Risky | Scroll the active window |
+| `desktop_cursor_position` / `desktop_screen_size` | Safe | Cursor and screen dimensions |
+
+**Memory, Git, System**
+
+| Tool | Risk | What it does |
+|------|------|-------------|
+| `save_memory` / `recall_memory` | Safe | Store and search durable memories |
+| `git_status` / `git_log` / `git_diff` | Safe | Git operations |
+| `system_info` / `hardware_info` | Safe | OS and hardware info |
 | `docker_exec` | Risky | Run commands in Docker sandbox |
 
 ### 7 AI Providers
@@ -155,7 +193,8 @@ Default motto: **"AI for the people. Not the portfolio."**
 | **Scheduler** | Cron-like scheduled tasks. "every 30m", "daily at 09:00" syntax |
 | **Docker Sandbox** | Containerized command execution with memory limits, network isolation, read-only rootfs |
 | **Tunnel** | Expose gateway via Cloudflare or ngrok for external access |
-| **Browser Tools** | Navigate any URL, extract content, search DuckDuckGo — all from the agent |
+| **Browser Tools** | Full browser session: navigate, snapshot, click, fill, type, search — with login/captcha checkpoints |
+| **Desktop Copilot** | Windows OS assist: apps, windows, mouse, keyboard, scroll (opt-in via Settings) |
 | **Service Manager** | Install as systemd user service (Linux) or Windows Task Scheduler |
 
 ### Security
@@ -178,9 +217,9 @@ Default motto: **"AI for the people. Not the portfolio."**
 │  Electron Main Process                                    │
 │  ┌──────────┐ ┌────────┐ ┌─────────┐ ┌───────────────┐ │
 │  │ Runtime   │ │ Tools  │ │ Storage │ │ Infrastructure│ │
-│  │ (ReAct)   │ │ (18)   │ │ (JSON)  │ │ Gateway       │ │
+│  │ (ReAct)   │ │ (41)   │ │ (JSON)  │ │ Gateway       │ │
 │  │ Provider  │ │ Browser│ │ Backup  │ │ Channels      │ │
-│  │ Creed     │ │ Docker │ │ Migrate │ │ Scheduler     │ │
+│  │ Creed     │ │ Desktop│ │ Migrate │ │ Scheduler     │ │
 │  │ Memory    │ │ HW     │ │         │ │ Tunnel        │ │
 │  └─────┬─────┘ └───┬────┘ └────┬────┘ │ Service       │ │
 │        │           │           │       └──────┬────────┘ │
@@ -222,7 +261,9 @@ DinoClaw/
 │   ├── preload.ts           # Context bridge (40+ IPC methods)
 │   ├── runtime.ts           # ReAct agent loop + infrastructure orchestration
 │   ├── creed.ts             # Dino Creed + system prompt builder
-│   ├── tools.ts             # 18-tool catalog + executor
+│   ├── register.ts          # Personal/play/task conversation routing
+│   ├── tools.ts             # 41-tool catalog + executor
+│   ├── desktop-automation.ts # Windows desktop copilot (mouse, keys, windows)
 │   ├── provider.ts          # 7 LLM provider implementations
 │   ├── storage.ts           # JSON persistence + migration + backup
 │   ├── gateway.ts           # REST API server with pairing
@@ -261,7 +302,7 @@ If you agree, star this repo. Share it with someone who would never touch a term
 ---
 
 <p align="center">
-  <strong>DinoClaw v0.3</strong><br/>
+  <strong>DinoClaw v0.4</strong><br/>
   Built by <a href="https://bostonai.io">BostonAi.io</a> · Created by <a href="https://github.com/AaronGrace978">@AaronGrace978</a><br/>
   <em>AI for the people. Not the portfolio.</em><br/>
   MIT License · Free forever

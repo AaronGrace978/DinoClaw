@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
+import { shell } from 'electron'
 import type {
   ExecutionPolicy,
   MemoryCategory,
@@ -30,6 +31,23 @@ import {
 } from './browser-tool'
 import { getHardwareInfo } from './hardware'
 import { DockerSandbox } from './docker-runtime'
+import {
+  captureDesktopScreenshot,
+  clickMouse,
+  focusWindow,
+  getCursorPosition,
+  getPrimaryScreenSize,
+  launchDesktopApp,
+  listDesktopWindows,
+  moveMouseAbsolute,
+  pasteTextAtFocus,
+  pressHotkeyAtFocus,
+  pressKeyAtFocus,
+  scrollMouseWheel,
+  typeKeysAtFocus,
+  waitForWindow,
+  type MouseButton,
+} from './desktop-automation'
 
 const execAsync = promisify(exec)
 
@@ -66,6 +84,21 @@ export const toolCatalog: ToolCatalogItem[] = [
   { name: 'browser_search',    risk: 'safe',     description: 'Search the web via DuckDuckGo. Args: {query}' },
   { name: 'hardware_info',     risk: 'safe',     description: 'Get detailed hardware info. No args needed.' },
   { name: 'docker_exec',       risk: 'risky',    description: 'Execute a command in Docker sandbox. Args: {command}' },
+  { name: 'desktop_screen_size', risk: 'safe',   description: 'Primary monitor width/height in pixels (planning). No args. Windows only in this build.' },
+  { name: 'desktop_mouse_move', risk: 'risky',   description: 'Move OS mouse cursor to absolute screen coordinates. Requires desktop automation enabled in policy. Args: {x, y}' },
+  { name: 'desktop_click',      risk: 'risky',   description: 'Click at current cursor position (call desktop_mouse_move first). Args: {button?: "left"|"right"|"middle"}' },
+  { name: 'desktop_type_text',  risk: 'risky',   description: 'Insert text into the OS-focused control (clipboard paste). Click/focus the field first — true copilot typing. Requires desktop automation. Args: {text}' },
+  { name: 'open_file_external', risk: 'moderate', description: 'Open a workspace file or folder with the default app (Notepad, Explorer, etc.). Args: {path}' },
+  { name: 'reveal_in_explorer', risk: 'moderate', description: 'Reveal a workspace file in the system file manager (select/highlight it). Args: {path}' },
+  { name: 'desktop_cursor_position', risk: 'safe', description: 'Get the current OS cursor coordinates. No args. Windows only in this build.' },
+  { name: 'desktop_list_windows', risk: 'safe', description: 'List visible desktop windows with title, process name, and pid. No args. Windows only in this build.' },
+  { name: 'desktop_focus_window', risk: 'risky', description: 'Focus a visible desktop window by matching its title or process name. Requires desktop automation. Args: {query}' },
+  { name: 'desktop_screenshot', risk: 'moderate', description: 'Capture a screenshot of the full virtual desktop. Args: {label?}. Windows only in this build.' },
+  { name: 'desktop_open_app', risk: 'risky', description: 'Launch a desktop application or executable directly. Args: {command, args?}' },
+  { name: 'desktop_wait_for_window', risk: 'safe', description: 'Wait until a visible desktop window appears by title or process name. Args: {query, timeoutMs?, pollMs?}' },
+  { name: 'desktop_press_key', risk: 'risky', description: 'Press a single key in the focused app. Args: {key, count?, delayMs?}. Good for Enter, Tab, arrows, PageDown, etc.' },
+  { name: 'desktop_hotkey', risk: 'risky', description: 'Send a hotkey chord to the focused app. Args: {modifiers:["ctrl"|"alt"|"shift"], key}. Good for Ctrl+L, Ctrl+T, Ctrl+W, etc.' },
+  { name: 'desktop_scroll', risk: 'risky', description: 'Scroll the mouse wheel in the active window. Args: {direction:"up"|"down", clicks?}.' },
 ]
 
 const toolSchemas = {
@@ -111,6 +144,39 @@ const toolSchemas = {
   browser_search: z.object({ query: z.string().min(1) }).strict(),
   hardware_info: z.object({}).optional(),
   docker_exec: z.object({ command: z.string().min(1) }),
+  desktop_screen_size: z.object({}).optional(),
+  desktop_mouse_move: z.object({ x: z.number(), y: z.number() }).strict(),
+  desktop_click: z.object({ button: z.enum(['left', 'right', 'middle']).optional() }).strict(),
+  desktop_type_text: z.object({
+    text: z.string().min(1).max(16_384),
+    mode: z.enum(['paste', 'keys']).optional(),
+    delayMs: z.number().min(0).max(500).optional(),
+  }).strict(),
+  open_file_external: z.object({ path: z.string().min(1) }).strict(),
+  reveal_in_explorer: z.object({ path: z.string().min(1) }).strict(),
+  desktop_cursor_position: z.object({}).optional(),
+  desktop_list_windows: z.object({}).optional(),
+  desktop_focus_window: z.object({ query: z.string().min(1) }).strict(),
+  desktop_screenshot: z.object({ label: z.string().optional() }).optional(),
+  desktop_open_app: z.object({ command: z.string().min(1), args: z.array(z.string()).optional() }).strict(),
+  desktop_wait_for_window: z.object({
+    query: z.string().min(1),
+    timeoutMs: z.number().min(100).max(60_000).optional(),
+    pollMs: z.number().min(25).max(5_000).optional(),
+  }).strict(),
+  desktop_press_key: z.object({
+    key: z.string().min(1),
+    count: z.number().min(1).max(50).optional(),
+    delayMs: z.number().min(0).max(500).optional(),
+  }).strict(),
+  desktop_hotkey: z.object({
+    modifiers: z.array(z.enum(['ctrl', 'control', 'alt', 'shift'])).min(1).max(3),
+    key: z.string().min(1),
+  }).strict(),
+  desktop_scroll: z.object({
+    direction: z.enum(['up', 'down']),
+    clicks: z.number().min(1).max(50).optional(),
+  }).strict(),
 } satisfies Record<ToolName, z.ZodTypeAny>
 
 export interface ToolContext {
@@ -118,6 +184,14 @@ export interface ToolContext {
   memory: MemoryEntry[]
   policy: ExecutionPolicy
   saveMemory: (fact: string, category?: MemoryCategory, importance?: number, tags?: string[]) => MemoryEntry
+}
+
+function assertDesktopAutomationEnabled(context: ToolContext): void {
+  if (!context.policy.desktopAutomationEnabled) {
+    throw new Error(
+      'Desktop mouse automation is disabled. Turn on "Desktop mouse automation" in Settings → Execution Policy.',
+    )
+  }
 }
 
 export function getToolRisk(toolName: ToolName): ToolCatalogItem['risk'] {
@@ -217,7 +291,7 @@ export async function executeTool(
         const cwd = args.cwd ? resolveLocalPath(args.cwd, context.workspaceRoot) : context.workspaceRoot
         assertPathAllowed(cwd, context)
 
-        const policyViolation = assertScriptContentAllowed(args.content, language)
+        const policyViolation = assertScriptContentAllowed(args.content)
         if (policyViolation) {
           return failResult(
             `Script content blocked by policy: ${policyViolation}`,
@@ -461,6 +535,230 @@ export async function executeTool(
           return failResult('Docker command failed.', 'docker_command_failed', true, output, { exitCode: result.exitCode })
         }
         return okResult('Docker command completed.', output, { exitCode: result.exitCode })
+      }
+
+      case 'desktop_screen_size': {
+        toolSchemas.desktop_screen_size.parse(rawArgs)
+        const size = await getPrimaryScreenSize()
+        if ('error' in size) {
+          return failResult(size.error, 'desktop_automation_unsupported', false)
+        }
+        return okResult(
+          `Primary screen: ${size.width}×${size.height}`,
+          `width: ${size.width}, height: ${size.height}`,
+          { width: size.width, height: size.height },
+        )
+      }
+
+      case 'desktop_mouse_move': {
+        assertDesktopAutomationEnabled(context)
+        const args = toolSchemas.desktop_mouse_move.parse(rawArgs)
+        const moved = await moveMouseAbsolute(args.x, args.y)
+        if ('error' in moved) {
+          return failResult(moved.error, 'desktop_mouse_failed', true)
+        }
+        return okResult(`Moved cursor to (${Math.round(args.x)}, ${Math.round(args.y)}).`, `x: ${args.x}, y: ${args.y}`, {
+          x: args.x,
+          y: args.y,
+        })
+      }
+
+      case 'desktop_click': {
+        assertDesktopAutomationEnabled(context)
+        const args = toolSchemas.desktop_click.parse(rawArgs)
+        const button = (args.button ?? 'left') as MouseButton
+        const clicked = await clickMouse(button)
+        if ('error' in clicked) {
+          return failResult(clicked.error, 'desktop_click_failed', true)
+        }
+        return okResult(`Clicked ${button} button at current position.`, `button: ${button}`, { button })
+      }
+
+      case 'desktop_type_text': {
+        assertDesktopAutomationEnabled(context)
+        const args = toolSchemas.desktop_type_text.parse(rawArgs)
+        const mode = args.mode ?? 'paste'
+        const typed = mode === 'keys'
+          ? await typeKeysAtFocus(args.text, args.delayMs ?? 35)
+          : await pasteTextAtFocus(args.text)
+        if ('error' in typed) {
+          return failResult(typed.error, 'desktop_type_failed', true)
+        }
+        const preview = args.text.length > 200 ? `${args.text.slice(0, 200)}…` : args.text
+        return okResult(`${mode === 'keys' ? 'Typed' : 'Pasted'} ${args.text.length} characters into focused control.`, preview, {
+          chars: args.text.length,
+          mode,
+        })
+      }
+
+      case 'open_file_external': {
+        const args = toolSchemas.open_file_external.parse(rawArgs)
+        const resolved = resolveLocalPath(args.path, context.workspaceRoot)
+        assertPathAllowed(resolved, context)
+        if (!fs.existsSync(resolved)) {
+          return failResult(`Path not found: ${resolved}`, 'path_not_found', false)
+        }
+        const errMsg = await shell.openPath(resolved)
+        if (errMsg) {
+          return failResult(`Could not open: ${errMsg}`, 'open_external_failed', false, undefined, { path: resolved })
+        }
+        return okResult(`Opened: ${resolved}`, resolved, { path: resolved })
+      }
+
+      case 'reveal_in_explorer': {
+        const args = toolSchemas.reveal_in_explorer.parse(rawArgs)
+        const resolved = resolveLocalPath(args.path, context.workspaceRoot)
+        assertPathAllowed(resolved, context)
+        if (!fs.existsSync(resolved)) {
+          return failResult(`Path not found: ${resolved}`, 'path_not_found', false)
+        }
+        const stat = fs.statSync(resolved)
+        if (stat.isDirectory()) {
+          const errMsg = await shell.openPath(resolved)
+          if (errMsg) {
+            return failResult(`Could not open folder: ${errMsg}`, 'reveal_failed', false, undefined, { path: resolved })
+          }
+          return okResult(`Opened folder: ${resolved}`, resolved, { path: resolved, kind: 'directory' })
+        }
+        shell.showItemInFolder(resolved)
+        return okResult(`Revealed in file manager: ${resolved}`, resolved, { path: resolved, kind: 'file' })
+      }
+
+      case 'desktop_cursor_position': {
+        toolSchemas.desktop_cursor_position.parse(rawArgs)
+        const pos = await getCursorPosition()
+        if ('error' in pos) {
+          return failResult(pos.error, 'desktop_automation_unsupported', false)
+        }
+        return okResult(`Cursor position: (${pos.x}, ${pos.y})`, `x: ${pos.x}, y: ${pos.y}`, {
+          x: pos.x,
+          y: pos.y,
+        })
+      }
+
+      case 'desktop_list_windows': {
+        toolSchemas.desktop_list_windows.parse(rawArgs)
+        const windows = await listDesktopWindows()
+        if ('error' in windows) {
+          return failResult(windows.error, 'desktop_window_list_failed', false)
+        }
+        const lines = windows.slice(0, 50).map((win, index) => (
+          `${index + 1}. [${win.processName}] ${win.title} (pid ${win.pid})`
+        ))
+        return okResult(
+          `Found ${windows.length} visible desktop windows.`,
+          lines.join('\n') || 'No visible windows found.',
+          { count: windows.length, windows: windows.slice(0, 50) },
+        )
+      }
+
+      case 'desktop_focus_window': {
+        assertDesktopAutomationEnabled(context)
+        const args = toolSchemas.desktop_focus_window.parse(rawArgs)
+        const focused = await focusWindow(args.query)
+        if ('error' in focused) {
+          return failResult(focused.error, 'desktop_focus_failed', true)
+        }
+        return okResult(
+          `Focused window: ${focused.title}`,
+          `[${focused.processName}] ${focused.title} (pid ${focused.pid})`,
+          {
+            title: focused.title,
+            processName: focused.processName,
+            pid: focused.pid,
+          },
+        )
+      }
+
+      case 'desktop_screenshot': {
+        const args = toolSchemas.desktop_screenshot.parse(rawArgs)
+        const safeLabel = (args?.label ?? 'desktop').replace(/[^a-z0-9-_]+/gi, '-').slice(0, 48) || 'desktop'
+        const outputPath = path.join(
+          context.workspaceRoot,
+          '.dinoclaw',
+          'desktop-artifacts',
+          `${safeLabel}-${Date.now()}.png`,
+        )
+        assertPathAllowed(outputPath, context)
+        const screenshot = await captureDesktopScreenshot(outputPath)
+        if ('error' in screenshot) {
+          return failResult(screenshot.error, 'desktop_screenshot_failed', true)
+        }
+        return okResult(
+          'Desktop screenshot captured.',
+          `Saved: ${screenshot.path}`,
+          { path: screenshot.path },
+          [{ path: screenshot.path, description: 'Desktop screenshot' }],
+        )
+      }
+
+      case 'desktop_open_app': {
+        assertDesktopAutomationEnabled(context)
+        const args = toolSchemas.desktop_open_app.parse(rawArgs)
+        const launched = await launchDesktopApp(args.command, args.args ?? [])
+        if ('error' in launched) {
+          return failResult(launched.error, 'desktop_open_app_failed', true)
+        }
+        return okResult(
+          `Launched app: ${args.command}`,
+          [args.command, ...(args.args ?? [])].join(' '),
+          { command: args.command, args: args.args ?? [] },
+        )
+      }
+
+      case 'desktop_wait_for_window': {
+        const args = toolSchemas.desktop_wait_for_window.parse(rawArgs)
+        const result = await waitForWindow(args.query, args.timeoutMs, args.pollMs)
+        if ('error' in result) {
+          return failResult(result.error, 'desktop_wait_for_window_failed', true)
+        }
+        return okResult(
+          `Window is visible: ${result.title}`,
+          `[${result.processName}] ${result.title} (pid ${result.pid})`,
+          { title: result.title, processName: result.processName, pid: result.pid },
+        )
+      }
+
+      case 'desktop_press_key': {
+        assertDesktopAutomationEnabled(context)
+        const args = toolSchemas.desktop_press_key.parse(rawArgs)
+        const result = await pressKeyAtFocus(args.key, args.count ?? 1, args.delayMs ?? 35)
+        if ('error' in result) {
+          return failResult(result.error, 'desktop_press_key_failed', true)
+        }
+        return okResult(
+          `Pressed key ${args.key}${args.count ? ` ×${args.count}` : ''}.`,
+          `key: ${args.key}, count: ${args.count ?? 1}, delayMs: ${args.delayMs ?? 35}`,
+          { key: args.key, count: args.count ?? 1, delayMs: args.delayMs ?? 35 },
+        )
+      }
+
+      case 'desktop_hotkey': {
+        assertDesktopAutomationEnabled(context)
+        const args = toolSchemas.desktop_hotkey.parse(rawArgs)
+        const result = await pressHotkeyAtFocus(args.modifiers, args.key)
+        if ('error' in result) {
+          return failResult(result.error, 'desktop_hotkey_failed', true)
+        }
+        return okResult(
+          `Sent hotkey ${args.modifiers.join('+')}+${args.key}.`,
+          `modifiers: ${args.modifiers.join(', ')}, key: ${args.key}`,
+          { modifiers: args.modifiers, key: args.key },
+        )
+      }
+
+      case 'desktop_scroll': {
+        assertDesktopAutomationEnabled(context)
+        const args = toolSchemas.desktop_scroll.parse(rawArgs)
+        const result = await scrollMouseWheel(args.direction, args.clicks ?? 3)
+        if ('error' in result) {
+          return failResult(result.error, 'desktop_scroll_failed', true)
+        }
+        return okResult(
+          `Scrolled ${args.direction} ${args.clicks ?? 3} clicks.`,
+          `direction: ${args.direction}, clicks: ${args.clicks ?? 3}`,
+          { direction: args.direction, clicks: args.clicks ?? 3 },
+        )
       }
     }
   } catch (error) {
@@ -753,7 +1051,7 @@ const BLOCKED_SCRIPT_PATTERNS = [
   /wget\s+.*\|\s*(bash|sh)\s+-/i,
 ]
 
-function assertScriptContentAllowed(content: string, _language: string): string | null {
+function assertScriptContentAllowed(content: string): string | null {
   for (const pattern of BLOCKED_SCRIPT_PATTERNS) {
     if (pattern.test(content)) return pattern.toString()
   }

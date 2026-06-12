@@ -56,6 +56,9 @@ interface DinoStore extends RuntimeSnapshot {
   clearError: () => void
 }
 
+let streamUnsubscribe: (() => void) | null = null
+let approvalUnsubscribe: (() => void) | null = null
+
 const emptySnapshot: RuntimeSnapshot = {
   creed: {
     name: 'DinoClaw', title: 'The Dino Creed', identity: '', relationship: '',
@@ -92,6 +95,16 @@ const emptySnapshot: RuntimeSnapshot = {
   pendingApprovals: [],
 }
 
+async function fetchSnapshot(): Promise<RuntimeSnapshot> {
+  const snapshot = await window.dinoClaw.getSnapshot()
+  try {
+    const serviceStatus = await window.dinoClaw.getServiceStatus()
+    return { ...snapshot, serviceStatus }
+  } catch {
+    return snapshot
+  }
+}
+
 export const useDinoStore = create<DinoStore>((set) => ({
   ...emptySnapshot,
   isLoading: true,
@@ -107,15 +120,22 @@ export const useDinoStore = create<DinoStore>((set) => ({
     set({ isLoading: true, error: null })
     try {
       if (!window.dinoClaw) { set({ isLoading: false }); return }
-      const snapshot = await window.dinoClaw.getSnapshot()
+      const snapshot = await fetchSnapshot()
       const workspace = await window.dinoClaw.getWorkspace()
       set({ ...snapshot, isLoading: false, workspace, approvalQueue: snapshot.pendingApprovals ?? [] })
 
-      window.dinoClaw.onStreamEvent((event) => {
+      streamUnsubscribe?.()
+      approvalUnsubscribe?.()
+
+      streamUnsubscribe = window.dinoClaw.onStreamEvent((event) => {
         set(state => ({ liveSteps: [...state.liveSteps, event] }))
       })
-      window.dinoClaw.onApprovalRequest((request) => {
-        set(state => ({ approvalQueue: [...state.approvalQueue, request] }))
+      approvalUnsubscribe = window.dinoClaw.onApprovalRequest((request) => {
+        set(state => (
+          state.approvalQueue.some(item => item.stepId === request.stepId)
+            ? state
+            : { approvalQueue: [...state.approvalQueue, request] }
+        ))
       })
     } catch (error) {
       set({ isLoading: false, error: error instanceof Error ? error.message : 'Failed to load' })
@@ -147,18 +167,27 @@ export const useDinoStore = create<DinoStore>((set) => ({
     set({ isRunning: true, error: null, liveSteps: [] })
     try {
       const response = await window.dinoClaw.runGoal(request)
-      const snapshot = await window.dinoClaw.getSnapshot()
+      const snapshot = await fetchSnapshot()
       set({ ...snapshot, isRunning: false, liveSteps: [] })
       return response
     } catch (error) {
-      set({ isRunning: false, error: error instanceof Error ? error.message : 'Run failed' })
+      set({ isRunning: false, liveSteps: [], error: error instanceof Error ? error.message : 'Run failed' })
       return null
     }
   },
 
   approveToolUse: async (runId, stepId, approved) => {
-    await window.dinoClaw.approveToolUse(runId, stepId, approved)
-    set(state => ({ approvalQueue: state.approvalQueue.filter(a => a.stepId !== stepId) }))
+    try {
+      await window.dinoClaw.approveToolUse(runId, stepId, approved)
+      const snapshot = await fetchSnapshot()
+      set({
+        ...snapshot,
+        approvalQueue: snapshot.pendingApprovals ?? [],
+        error: null,
+      })
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : 'Failed to resolve approval' })
+    }
   },
 
   deleteMemory: async (id) => {

@@ -74,6 +74,21 @@ export type ToolName =
   | 'browser_search'
   | 'hardware_info'
   | 'docker_exec'
+  | 'desktop_screen_size'
+  | 'desktop_mouse_move'
+  | 'desktop_click'
+  | 'desktop_type_text'
+  | 'open_file_external'
+  | 'reveal_in_explorer'
+  | 'desktop_cursor_position'
+  | 'desktop_list_windows'
+  | 'desktop_focus_window'
+  | 'desktop_screenshot'
+  | 'desktop_open_app'
+  | 'desktop_wait_for_window'
+  | 'desktop_press_key'
+  | 'desktop_hotkey'
+  | 'desktop_scroll'
 
 /* ─── Creed (enhanced with mood + traits) ───────────────── */
 
@@ -115,6 +130,8 @@ export interface ExecutionPolicy {
   allowedCommands: string[]
   blockedPaths: string[]
   requireApprovalAboveRisk: ToolRisk
+  /** When true, allows OS-level control tools like focus/mouse/click/type. Default false. */
+  desktopAutomationEnabled?: boolean
 }
 
 /* ─── Memory ────────────────────────────────────────────── */

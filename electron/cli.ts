@@ -37,6 +37,7 @@ type Decision = z.infer<typeof decisionSchema>
 
 const dataDir = path.join(os.homedir(), '.dinoclaw')
 const storage = createStorage(dataDir)
+const BROWSER_MUTATION_TOOLS: ToolName[] = ['browser_click', 'browser_fill', 'browser_type', 'run_script']
 
 function log(prefix: string, msg: string): void {
   const color = {
@@ -192,7 +193,12 @@ async function executeGoal(request: GoalRequest): Promise<void> {
       log('  TOOL', `${toolName}(${JSON.stringify(decision.args)})`)
 
       const risk = getToolRisk(toolName)
-      if (shouldRequireApproval(state.policy, risk, toolName)) {
+      if (shouldRequireApproval(
+        state.policy,
+        risk,
+        toolName,
+        (state.browser ?? DEFAULT_BROWSER_CONFIG).requireApprovalForWrites,
+      )) {
         const msg = `Tool ${toolName} requires approval in current policy. Run this goal in the desktop app to approve it.`
         log(' ERROR', msg)
         run.status = 'failed'
@@ -263,8 +269,9 @@ function shouldRequireApproval(
   policy: { mode: string; requireApprovalAboveRisk: 'safe' | 'moderate' | 'risky' },
   risk: string,
   toolName: ToolName,
+  requireApprovalForWrites: boolean,
 ): boolean {
-  if (['browser_click', 'browser_fill', 'browser_type', 'run_script'].includes(toolName)) return true
+  if (requireApprovalForWrites && BROWSER_MUTATION_TOOLS.includes(toolName)) return true
   if (policy.mode === 'open') return false
   if (policy.mode === 'lockdown') return true
   const riskOrder = { safe: 0, moderate: 1, risky: 2 }

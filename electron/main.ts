@@ -105,8 +105,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('dinoclaw:updateModel', (_e, model: ModelSettings) => runtime.updateModel(model))
   ipcMain.handle('dinoclaw:updatePolicy', (_e, policy: ExecutionPolicy) => runtime.updatePolicy(policy))
   ipcMain.handle('dinoclaw:runGoal', (_e, request: GoalRequest) => runtime.runGoal(request))
-  ipcMain.handle('dinoclaw:approveToolUse', (_e, _runId: string, stepId: string, approved: boolean) =>
-    runtime.resolveApproval(stepId, approved),
+  ipcMain.handle('dinoclaw:approveToolUse', (_e, runId: string, stepId: string, approved: boolean) =>
+    runtime.resolveApproval(runId, stepId, approved),
   )
 
   // Memory

@@ -18,6 +18,7 @@ import { defaultCreed } from './creed'
 import { DEFAULT_BROWSER_CONFIG } from './browser-tool'
 import { DEFAULT_DOCKER_CONFIG, type DockerConfig } from './docker-runtime'
 import { getBuiltInSkillPacks, mergeSkillPacks } from './skills'
+import { applyRetiredOllamaCloudModelMigrations } from './ollama-cloud-retirements'
 
 export interface PersistedState {
   creed: DinoCreed
@@ -53,6 +54,7 @@ const DEFAULT_STATE: PersistedState = {
     allowedCommands: [],
     blockedPaths: [],
     requireApprovalAboveRisk: 'risky',
+    desktopAutomationEnabled: false,
   },
   memory: [],
   runs: [],
@@ -147,11 +149,13 @@ function migrate(state: PersistedState): PersistedState {
 
   const model = state.model
   if (!model.maxTokens) model.maxTokens = 4096
+  applyRetiredOllamaCloudModelMigrations(model)
 
   const policy = state.policy
   if (!policy.allowedCommands) policy.allowedCommands = []
   if (!policy.blockedPaths) policy.blockedPaths = []
   if (!policy.requireApprovalAboveRisk) policy.requireApprovalAboveRisk = 'risky'
+  if (typeof policy.desktopAutomationEnabled !== 'boolean') policy.desktopAutomationEnabled = false
 
   state.skills = mergeSkillPacks(Array.isArray(state.skills) ? state.skills : [])
 

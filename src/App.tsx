@@ -68,7 +68,8 @@ function App() {
 
   const browserDomainsKey = useMemo(() => store.browser.allowedDomains.join(','), [store.browser.allowedDomains])
   useEffect(() => {
-    setBrowserDomainsInput(store.browser.allowedDomains.join(', '))
+    const next = store.browser.allowedDomains.join(', ')
+    queueMicrotask(() => setBrowserDomainsInput(next))
   }, [browserDomainsKey, store.browser.allowedDomains])
 
   const handleKeyboard = useCallback((e: KeyboardEvent) => {
@@ -101,6 +102,10 @@ function App() {
     if (!t) return
     const r = await store.runGoal({ goal: t })
     if (r?.ok) setGoal('')
+  }
+
+  const handleStop = async () => {
+    await store.runGoal({ goal: 'stop' })
   }
 
   const handleSaveCreed = async () => {
@@ -385,6 +390,12 @@ function App() {
                     <Zap size={16} />
                     {store.isRunning ? 'Running...' : 'Execute'}
                   </button>
+                  {store.isRunning && (
+                    <button className="btn-ghost" onClick={() => void handleStop()}>
+                      <Square size={16} />
+                      Stop
+                    </button>
+                  )}
                   <button className="btn-ghost" onClick={() => void store.openDataDirectory()}>
                     <FolderOpen size={16} /> Data
                   </button>
@@ -1000,6 +1011,24 @@ function App() {
                       <strong>review-risky</strong> — risky tools require approval<br />
                       <strong>lockdown</strong> — all tools require approval
                     </p>
+                    <label className="field-row" style={{ alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(store.policy.desktopAutomationEnabled)}
+                        onChange={e =>
+                          void store.savePolicy({ ...store.policy, desktopAutomationEnabled: e.target.checked })
+                        }
+                      />
+                      <span>
+                        <strong>Desktop copilot (OS assist)</strong> — launch apps, wait for windows, inspect screens, focus a real
+                        app, move/click the mouse, type, send keys/hotkeys, and scroll via <code>desktop_open_app</code>,{' '}
+                        <code>desktop_wait_for_window</code>, <code>desktop_list_windows</code>, <code>desktop_screenshot</code>,{' '}
+                        <code>desktop_focus_window</code>, <code>desktop_mouse_move</code>, <code>desktop_click</code>,{' '}
+                        <code>desktop_type_text</code>, <code>desktop_press_key</code>, <code>desktop_hotkey</code>, and{' '}
+                        <code>desktop_scroll</code>. Also use <code>open_file_external</code> / <code>reveal_in_explorer</code> to
+                        pull up workspace files. Still respects approval when policy requires it.
+                      </span>
+                    </label>
                   </div>
                 </div>
 
@@ -1046,14 +1075,24 @@ function ApprovalModal({
   onApprove: (r: ApprovalRequest) => void
   onDeny: (r: ApprovalRequest) => void
 }) {
+  const title = request.title
+    ?? (request.kind === 'browser_checkpoint' ? 'Browser Checkpoint Approval' : 'Tool Approval Required')
+  const kindLabel = request.kind === 'browser_checkpoint' ? 'browser checkpoint' : 'tool'
+  const checkpointLabel = request.checkpointType?.replace(/_/g, ' ')
+
   return (
     <div className="modal-overlay">
       <div className="modal approval-modal">
         <div className="approval-header">
           <AlertTriangle size={24} className="approval-icon" />
-          <h2>Tool Approval Required</h2>
+          <h2>{title}</h2>
         </div>
         <div className="approval-body">
+          <div className="approval-field">
+            <span className="approval-label">Type:</span>
+            <span className="pill">{kindLabel}</span>
+            {checkpointLabel && <span className="pill">{checkpointLabel}</span>}
+          </div>
           <div className="approval-field">
             <span className="approval-label">Tool:</span>
             <span className={`pill risk-${request.risk}`}>{request.toolName}</span>

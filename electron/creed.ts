@@ -9,6 +9,7 @@ import type {
   BrowserConfig,
 } from '../src/shared/contracts'
 import { selectRelevantSkillPacks } from './skills'
+import { detectRegisterWithContext, registerDirective } from './register'
 
 export const defaultTraits: CreedTrait[] = [
   { name: 'Enthusiastic', score: 0.9 },
@@ -102,6 +103,9 @@ export function buildSystemPrompt(input: {
 
   const moodDesc = MOOD_DESCRIPTORS[creed.mood]
 
+  const register = goal ? detectRegisterWithContext(goal) : 'task'
+  const registerBlock = registerDirective(register)
+
   const enabledSkills = skills?.filter(s => s.enabled) ?? []
   const relevantSkills = goal ? selectRelevantSkillPacks(goal, enabledSkills) : enabledSkills.slice(0, 3)
   const skillLines = enabledSkills.map(s => `- ${s.name}: ${s.description}`)
@@ -143,6 +147,9 @@ export function buildSystemPrompt(input: {
     `## Current Mood`,
     moodDesc,
     '',
+    `## Conversation Register`,
+    registerBlock,
+    '',
     `## Personality Traits`,
     traitLine,
     '',
@@ -155,6 +162,7 @@ export function buildSystemPrompt(input: {
     `## Execution Policy`,
     `- Mode: ${policy.mode}`,
     `- Max steps: ${policy.maxSteps}`,
+    `- Desktop copilot automation (OS app launch + focus + mouse + typing + keys + scroll): ${policy.desktopAutomationEnabled ? 'ENABLED — desktop_open_app, desktop_wait_for_window, desktop_focus_window, desktop_mouse_move, desktop_click, desktop_type_text, desktop_press_key, desktop_hotkey, desktop_scroll are allowed' : 'disabled — enable in Settings for Normandy-style OS assist (open app, focus, mouse, keys, scroll)'}`,
     policy.allowedCommands.length > 0 ? `- Allowed commands: ${policy.allowedCommands.join(', ')}` : '',
     policy.blockedPaths.length > 0 ? `- Blocked paths: ${policy.blockedPaths.join(', ')}` : '',
     '',
@@ -213,6 +221,8 @@ export function buildSystemPrompt(input: {
     '- A web task is NOT complete until the requested action (post, submit, click) has actually been performed. Opening a URL is step 1, not completion.',
     '- Browser tool argument contracts are strict: browser_navigate {url}; browser_wait {ms}; browser_click {target}; browser_fill/browser_type {target,value}; open_url {url} only.',
     '- If browser tools are disabled, say so and suggest enabling them in Settings. Do not fall back to open_url for automation.',
+    '- For desktop-control goals (mouse, cursor, screen, focus, launch app, open file, reveal file, type into the focused app, press shortcuts, scroll pages), prefer desktop_open_app, desktop_wait_for_window, desktop_list_windows, desktop_focus_window, desktop_screenshot, desktop_cursor_position, desktop_screen_size, desktop_mouse_move, desktop_click, desktop_type_text, desktop_press_key, desktop_hotkey, desktop_scroll, open_file_external, and reveal_in_explorer. Do NOT use browser_* tools unless the goal explicitly mentions a website, browser, URL, or web page.',
+    '- For real desktop tasks, inspect first: launch the app if needed, wait for its window, focus it, and only then click, type, press keys, or scroll. Use desktop_type_text mode="keys" when the operator wants visible real-time typing.',
   )
 
   return sections.filter(line => line !== undefined).join('\n')

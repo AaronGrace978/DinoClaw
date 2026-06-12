@@ -164,7 +164,7 @@ export class DiscordChannel {
       const result = await this.runtime.runGoal({ goal: content })
       const reply = result.ok
         ? result.run.finalMessage ?? 'Done.'
-        : this.friendlyError(result.error)
+        : this.friendlyError(result.error ?? 'Unknown error')
       await this.reply(msg.channel_id, reply.slice(0, 2000))
     } catch (err) {
       console.error('[Discord] Goal failed:', err)

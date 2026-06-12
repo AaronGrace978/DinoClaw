@@ -21,6 +21,7 @@ import type {
   RunRecord,
   RunStep,
   RuntimeSnapshot,
+  ServiceStatus,
   RuntimeStats,
   Skill,
   StepKind,
@@ -78,6 +79,61 @@ const INTERACTIVE_BROWSER_KEYWORDS = [
   'reply',
   'send message',
 ]
+const WEB_CONTEXT_KEYWORDS = [
+  'http://',
+  'https://',
+  'www.',
+  '.com',
+  '.net',
+  '.org',
+  'website',
+  'web page',
+  'browser',
+  'tab',
+  'url',
+  'linkedin',
+  'twitter',
+  'x.com',
+  'reddit',
+  'github.com',
+  'discord.com',
+]
+const DESKTOP_CONTROL_KEYWORDS = [
+  'desktop',
+  'mouse',
+  'cursor',
+  'screen',
+  'notepad',
+  'chrome',
+  'browser app',
+  'editor',
+  'type in',
+  'type into',
+  'open app',
+  'launch app',
+  'window',
+  'scroll',
+  'shortcut',
+  'hotkey',
+  'press key',
+  'open file',
+  'pull up file',
+  'reveal file',
+  'explorer',
+  'focus window',
+  'move around',
+  'take control',
+]
+const STOP_GOALS = new Set([
+  'stop',
+  'cancel',
+  'abort',
+  'halt',
+  'stop run',
+  'stop current run',
+  'cancel run',
+  'cancel current run',
+])
 
 const TOOL_ARG_CONTRACTS: Partial<Record<ToolName, string>> = {
   open_url: '{"url":"https://..."}',
@@ -86,6 +142,18 @@ const TOOL_ARG_CONTRACTS: Partial<Record<ToolName, string>> = {
   browser_click: '{"target":"text:Start a post"}',
   browser_fill: '{"target":"placeholder:What do you want to talk about?","value":"..."}',
   browser_type: '{"target":"placeholder:What do you want to talk about?","value":"..."}',
+  desktop_mouse_move: '{"x":640,"y":360}',
+  desktop_click: '{"button":"left"}',
+  desktop_type_text: '{"text":"Hello from DinoClaw","mode":"keys","delayMs":35}',
+  open_file_external: '{"path":"README.md"}',
+  reveal_in_explorer: '{"path":"src/App.tsx"}',
+  desktop_focus_window: '{"query":"Visual Studio Code"}',
+  desktop_screenshot: '{"label":"desktop"}',
+  desktop_open_app: '{"command":"notepad.exe"}',
+  desktop_wait_for_window: '{"query":"Notepad","timeoutMs":8000}',
+  desktop_press_key: '{"key":"Enter"}',
+  desktop_hotkey: '{"modifiers":["ctrl"],"key":"l"}',
+  desktop_scroll: '{"direction":"down","clicks":4}',
 }
 
 const decisionSchema = z.discriminatedUnion('type', [
@@ -116,8 +184,10 @@ export class DinoRuntime {
   private readonly startTime: number
   private pendingApprovals = new Map<string, PendingApproval>()
   private pendingRunResolvers = new Map<string, (response: RunGoalResponse) => void>()
+  private cancelledRunIds = new Set<string>()
   private queueProcessing = false
   private dockerAvailable = false
+  private serviceStatus: ServiceStatus = 'unknown'
 
   readonly gateway: Gateway
   readonly channels: ChannelManager
@@ -163,6 +233,7 @@ export class DinoRuntime {
 
     this.recoverInterruptedRuns()
     void this.refreshDockerAvailability()
+    void this.refreshServiceStatus()
     void this.restoreChannelConnections()
     this.kickQueue()
   }
@@ -190,7 +261,7 @@ export class DinoRuntime {
       cronJobs: this.state.cronJobs,
       browser: this.browserConfig,
       browserSession: this.getBrowserSessionInfo(),
-      serviceStatus: 'unknown',
+      serviceStatus: this.serviceStatus,
       pluginActive: isPluginActive(),
       pluginStatus: getPlugin()?.getStatus?.() ?? null,
       queueDepth: this.state.runQueue.length,
@@ -220,6 +291,10 @@ export class DinoRuntime {
   async runGoal(request: GoalRequest): Promise<RunGoalResponse> {
     const goal = request.goal.trim()
     if (!goal) throw new Error('Goal cannot be empty.')
+
+    if (STOP_GOALS.has(goal.toLowerCase())) {
+      return this.stopActiveRuns(goal)
+    }
 
     const run: RunRecord = {
       id: randomUUID(),
@@ -253,7 +328,78 @@ export class DinoRuntime {
     })
   }
 
-  resolveApproval(stepId: string, approved: boolean): void {
+  private stopActiveRuns(goal = 'stop'): RunGoalResponse {
+    const now = Date.now()
+    const activeRunId = this.state.activeRunId
+    const queuedRunIds = new Set(this.state.runQueue.map(item => item.runId))
+    const targetRunIds = new Set<string>([...queuedRunIds, ...(activeRunId ? [activeRunId] : [])])
+
+    let stopped = 0
+    for (const run of this.state.runs) {
+      if (!targetRunIds.has(run.id)) continue
+      if (run.status === 'completed' || run.status === 'failed') continue
+      this.cancelledRunIds.add(run.id)
+      run.status = 'failed'
+      run.error = 'Stopped by operator'
+      run.finishedAt = now
+      run.steps.push(createStep('error', 'Run stopped', 'Stopped by operator request.'))
+      stopped += 1
+    }
+
+    const removedQueueItems = this.state.runQueue.filter(item => item.runId !== activeRunId)
+    this.state.runQueue = this.state.runQueue.filter(item => item.runId === activeRunId)
+
+    for (const item of removedQueueItems) {
+      const run = this.state.runs.find(r => r.id === item.runId)
+      this.resolveRunPromise(item.runId, {
+        ok: false,
+        run: run ?? this.createMissingRun(item),
+        error: 'Stopped by operator',
+      })
+    }
+
+    const approvalIds = new Set(
+      this.state.pendingApprovals
+        .filter(req => targetRunIds.has(req.runId))
+        .map(req => req.stepId),
+    )
+    this.state.pendingApprovals = this.state.pendingApprovals.filter(req => !approvalIds.has(req.stepId))
+    for (const stepId of approvalIds) {
+      const pending = this.pendingApprovals.get(stepId)
+      if (!pending) continue
+      clearTimeout(pending.timeout)
+      pending.resolve(false)
+      this.pendingApprovals.delete(stepId)
+    }
+
+    const controlRun: RunRecord = {
+      id: randomUUID(),
+      goal,
+      status: 'completed',
+      startedAt: now,
+      finishedAt: now,
+      finalMessage: stopped > 0 ? `Stopped ${stopped} run(s).` : 'No active run to stop.',
+      steps: [
+        createStep(
+          'final',
+          'Operator stop command',
+          stopped > 0 ? `Stopped ${stopped} run(s) and cleared pending approvals.` : 'There was no running or queued work.',
+        ),
+      ],
+      toolsUsed: [],
+    }
+
+    this.state.runs.push(controlRun)
+    this.trimRuns()
+    this.persist()
+    return { ok: true, run: controlRun }
+  }
+
+  resolveApproval(runId: string, stepId: string, approved: boolean): void {
+    const pendingRequest = this.state.pendingApprovals.find(req => req.stepId === stepId)
+    if (pendingRequest && pendingRequest.runId !== runId) {
+      throw new Error('Approval request does not match the active run.')
+    }
     this.state.pendingApprovals = this.state.pendingApprovals.filter(req => req.stepId !== stepId)
     const pending = this.pendingApprovals.get(stepId)
     if (pending) {
@@ -423,15 +569,28 @@ export class DinoRuntime {
   }
 
   async getServiceStatus() {
-    return await this.serviceManager.getStatus()
+    return await this.refreshServiceStatus()
   }
 
   async installService() {
-    return await this.serviceManager.install()
+    const result = await this.serviceManager.install()
+    await this.refreshServiceStatus()
+    return result
   }
 
   async uninstallService() {
-    return await this.serviceManager.uninstall()
+    const result = await this.serviceManager.uninstall()
+    await this.refreshServiceStatus()
+    return result
+  }
+
+  private async refreshServiceStatus(): Promise<ServiceStatus> {
+    try {
+      this.serviceStatus = await this.serviceManager.getStatus()
+    } catch {
+      this.serviceStatus = 'unknown'
+    }
+    return this.serviceStatus
   }
 
   // ─── Queue + Execution ───────────────────────────────────
@@ -514,11 +673,16 @@ export class DinoRuntime {
         this.persist()
       }
 
+      if (isInteractiveDesktopGoal(queueItem.goal) && !this.state.policy.desktopAutomationEnabled) {
+        this.enableDesktopAutomationForInteractiveGoal(run, queueItem.goal)
+      }
+
       if (isInteractiveBrowserGoal(queueItem.goal) && !this.browserConfig.enabled) {
         this.enableBrowserAutomationForInteractiveGoal(run, queueItem.goal)
       }
 
       for (let stepIndex = queueItem.stepIndex; stepIndex < this.state.policy.maxSteps; stepIndex++) {
+        this.assertRunNotCancelled(run)
         queueItem.stepIndex = stepIndex
         queueItem.updatedAt = Date.now()
         this.persist()
@@ -528,6 +692,7 @@ export class DinoRuntime {
           if (approvalReq) {
             this.emitApprovalRequest(approvalReq)
             const approved = await this.waitForApproval(approvalReq.stepId)
+            this.assertRunNotCancelled(run)
             queueItem.awaitingApprovalStepId = undefined
             run.status = 'running'
             this.state.pendingApprovals = this.state.pendingApprovals.filter(a => a.stepId !== approvalReq.stepId)
@@ -594,6 +759,7 @@ export class DinoRuntime {
 
         const stepStart = Date.now()
         const rawDecision = await callModel(this.state.model, queueItem.messages)
+        this.assertRunNotCancelled(run)
         const decision = parseDecision(rawDecision)
 
         if (decision.type === 'message') {
@@ -690,6 +856,7 @@ export class DinoRuntime {
             kind: 'tool',
           })
           if (!approved) {
+            if (this.cancelledRunIds.has(run.id)) throw new Error('Stopped by operator')
             const deniedStep = createStep('denied', `Tool ${toolName} denied by operator`, '', toolName)
             run.steps.push(deniedStep)
             this.emitStreamEvent(run.id, deniedStep)
@@ -710,6 +877,7 @@ export class DinoRuntime {
           policy: this.state.policy,
           saveMemory: (fact, category, importance, tags) => this.saveMemory(fact, category, importance, tags),
         })
+        this.assertRunNotCancelled(run)
 
         if (!run.toolsUsed.includes(toolName)) {
           run.toolsUsed.push(toolName)
@@ -803,6 +971,7 @@ export class DinoRuntime {
     this.emitApprovalRequest(request)
 
     const approved = await this.waitForApproval(request.stepId)
+    this.assertRunNotCancelled(run)
 
     queueItem.awaitingApprovalStepId = undefined
     run.status = 'running'
@@ -879,6 +1048,12 @@ export class DinoRuntime {
     })
   }
 
+  private assertRunNotCancelled(run: RunRecord): void {
+    if (!this.cancelledRunIds.has(run.id)) return
+    this.cancelledRunIds.delete(run.id)
+    throw new Error('Stopped by operator')
+  }
+
   // ─── Private helpers ─────────────────────────────────────
 
   private addReflectionStep(
@@ -906,11 +1081,26 @@ export class DinoRuntime {
   }
 
   private recoverInterruptedRuns(): void {
-    if (!this.state.activeRunId) return
-    const activeRun = this.state.runs.find(r => r.id === this.state.activeRunId)
-    if (activeRun && (activeRun.status === 'running' || activeRun.status === 'awaiting_approval')) {
-      activeRun.status = 'queued'
+    const now = Date.now()
+    const hadInterruptedWork =
+      Boolean(this.state.activeRunId) ||
+      this.state.runQueue.length > 0 ||
+      this.state.runs.some(r => r.status === 'queued' || r.status === 'running' || r.status === 'awaiting_approval')
+
+    if (!hadInterruptedWork) return
+
+    for (const run of this.state.runs) {
+      if (run.status !== 'queued' && run.status !== 'running' && run.status !== 'awaiting_approval') continue
+      run.status = 'failed'
+      run.error = 'Interrupted when DinoClaw restarted'
+      run.finishedAt = now
+      run.steps.push(createStep('error', 'Run interrupted', 'DinoClaw restarted before this run completed.'))
     }
+
+    this.state.runQueue = []
+    this.state.pendingApprovals = []
+    this.pendingApprovals.clear()
+    this.state.approvalDecisions = {}
     this.state.activeRunId = null
     this.persist()
   }
@@ -1007,6 +1197,19 @@ export class DinoRuntime {
     run.steps.push(step)
     this.emitStreamEvent(run.id, step)
     this.addAudit('Browser automation auto-enabled for interactive web task', 'browser_navigate', 'moderate', true, goal)
+    this.persist()
+  }
+
+  private enableDesktopAutomationForInteractiveGoal(run: RunRecord, goal: string): void {
+    if (this.state.policy.desktopAutomationEnabled) return
+    this.state.policy = { ...this.state.policy, desktopAutomationEnabled: true }
+
+    const note =
+      'Interactive desktop goal detected. Desktop copilot automation was auto-enabled so DinoClaw can focus windows, move the mouse, click, and type. Risky desktop actions still require approval in review-risky mode.'
+    const step = createStep('reflection', 'Desktop automation auto-enabled', note, 'desktop_focus_window')
+    run.steps.push(step)
+    this.emitStreamEvent(run.id, step)
+    this.addAudit('Desktop automation auto-enabled for interactive desktop task', 'desktop_focus_window', 'risky', true, goal)
     this.persist()
   }
 
@@ -1236,7 +1439,19 @@ function extractJsonObjectCandidates(input: string): string[] {
 
 function isInteractiveBrowserGoal(goal: string): boolean {
   const lower = goal.toLowerCase()
-  return INTERACTIVE_BROWSER_KEYWORDS.some(keyword => lower.includes(keyword))
+  const hasDesktopIntent = DESKTOP_CONTROL_KEYWORDS.some(keyword => lower.includes(keyword))
+  const hasWebContext = WEB_CONTEXT_KEYWORDS.some(keyword => lower.includes(keyword))
+  const hasBrowserAction = INTERACTIVE_BROWSER_KEYWORDS.some(keyword => lower.includes(keyword))
+
+  if (hasDesktopIntent && !hasWebContext) return false
+  return hasWebContext && hasBrowserAction
+}
+
+function isInteractiveDesktopGoal(goal: string): boolean {
+  const lower = goal.toLowerCase()
+  const hasDesktopIntent = DESKTOP_CONTROL_KEYWORDS.some(keyword => lower.includes(keyword))
+  const hasWebContext = WEB_CONTEXT_KEYWORDS.some(keyword => lower.includes(keyword))
+  return hasDesktopIntent && !hasWebContext
 }
 
 function buildToolArgHint(toolName: ToolName, result: ToolResult): string | null {
@@ -1380,6 +1595,90 @@ function buildApprovalPreview(request: ApprovalRequest, workspaceRoot: string): 
     case 'browser_navigate': {
       const url = typeof request.args.url === 'string' ? request.args.url : ''
       return url ? `This will navigate the DinoClaw browser to:\n${url}` : undefined
+    }
+    case 'desktop_mouse_move': {
+      const x = typeof request.args.x === 'number' ? request.args.x : null
+      const y = typeof request.args.y === 'number' ? request.args.y : null
+      if (x === null || y === null) return undefined
+      return [
+        'This will move the real OS mouse cursor (not just the DinoClaw window).',
+        `Target screen coordinates: (${x}, ${y})`,
+      ].join('\n')
+    }
+    case 'desktop_click': {
+      const button = typeof request.args.button === 'string' ? request.args.button : 'left'
+      return [
+        'This will send a real OS mouse click at the current cursor position.',
+        `Button: ${button}`,
+        'Tip: call desktop_mouse_move first if you need to click a specific place.',
+      ].join('\n')
+    }
+    case 'desktop_type_text': {
+      const text = typeof request.args.text === 'string' ? request.args.text : ''
+      const mode = typeof request.args.mode === 'string' ? request.args.mode : 'paste'
+      const delayMs = typeof request.args.delayMs === 'number' ? request.args.delayMs : 35
+      const preview = text.length > 400 ? `${text.slice(0, 400)}…` : text
+      return [
+        mode === 'keys'
+          ? 'This will type visible keystrokes into whatever window/control currently has keyboard focus.'
+          : 'This will paste text into whatever window/control currently has keyboard focus (clipboard + Ctrl+V).',
+        'Ensure the correct field is focused first (often: desktop_focus_window, then desktop_mouse_move + desktop_click on a text box).',
+        `Characters: ${text.length}`,
+        `Mode: ${mode}${mode === 'keys' ? ` (${delayMs}ms delay)` : ''}`,
+        preview ? `Preview:\n${preview}` : '',
+      ].filter(Boolean).join('\n')
+    }
+    case 'open_file_external': {
+      const p = typeof request.args.path === 'string' ? request.args.path : ''
+      return p ? `This will open with the default application:\n${p}` : undefined
+    }
+    case 'reveal_in_explorer': {
+      const p = typeof request.args.path === 'string' ? request.args.path : ''
+      return p ? `This will show the item in the system file manager:\n${p}` : undefined
+    }
+    case 'desktop_focus_window': {
+      const query = typeof request.args.query === 'string' ? request.args.query : ''
+      return query
+        ? `This will focus a real desktop window matching this title or process name:\n${query}`
+        : undefined
+    }
+    case 'desktop_screenshot': {
+      const label = typeof request.args.label === 'string' ? request.args.label : 'desktop'
+      return `This will capture the full desktop to an artifact image.\nLabel: ${label}`
+    }
+    case 'desktop_open_app': {
+      const command = typeof request.args.command === 'string' ? request.args.command : ''
+      const args = Array.isArray(request.args.args) ? request.args.args.map(String) : []
+      return command
+        ? `This will launch a desktop app or executable:\n${[command, ...args].join(' ')}`
+        : undefined
+    }
+    case 'desktop_wait_for_window': {
+      const query = typeof request.args.query === 'string' ? request.args.query : ''
+      const timeoutMs = typeof request.args.timeoutMs === 'number' ? request.args.timeoutMs : 8000
+      return query
+        ? `This will wait for a desktop window matching this query to appear:\n${query}\nTimeout: ${timeoutMs}ms`
+        : undefined
+    }
+    case 'desktop_press_key': {
+      const key = typeof request.args.key === 'string' ? request.args.key : ''
+      const count = typeof request.args.count === 'number' ? request.args.count : 1
+      const delayMs = typeof request.args.delayMs === 'number' ? request.args.delayMs : 35
+      return key
+        ? `This will press a key in the focused app.\nKey: ${key}\nCount: ${count}\nDelay: ${delayMs}ms`
+        : undefined
+    }
+    case 'desktop_hotkey': {
+      const key = typeof request.args.key === 'string' ? request.args.key : ''
+      const modifiers = Array.isArray(request.args.modifiers) ? request.args.modifiers.map(String) : []
+      return key && modifiers.length > 0
+        ? `This will send a hotkey to the focused app:\n${modifiers.join('+')}+${key}`
+        : undefined
+    }
+    case 'desktop_scroll': {
+      const direction = typeof request.args.direction === 'string' ? request.args.direction : 'down'
+      const clicks = typeof request.args.clicks === 'number' ? request.args.clicks : 3
+      return `This will scroll the active window.\nDirection: ${direction}\nClicks: ${clicks}`
     }
     default:
       return undefined
