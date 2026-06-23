@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import type { ApprovalRequest } from '../shared/contracts'
 import { useLinkStore, tryRestoreSession } from './store'
+import { validateNestUrl } from './api'
 import './Link.css'
 
 function moodEmoji(mood: string): string {
@@ -94,6 +95,7 @@ function PairScreen() {
   const { pair, connecting, error } = useLinkStore()
 
   const digits = code.replace(/\D/g, '').slice(0, 6)
+  const nestWarning = validateNestUrl(nestUrl)
 
   return (
     <div className="link-shell link-shell--pair">
@@ -140,6 +142,10 @@ function PairScreen() {
               ))}
             </div>
           </label>
+
+          {nestWarning && (
+            <p className="link-error banner link-pair-warning" role="status">{nestWarning}</p>
+          )}
 
           {error && <p className="link-error" role="alert">{error}</p>}
         </div>

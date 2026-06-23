@@ -750,6 +750,14 @@ html.link-app button {
   border-radius: 12px;
   padding: 12px 14px;
   text-align: left;
+  line-height: 1.45;
+}
+
+.link-pair-warning {
+  background: rgba(255, 200, 87, 0.1);
+  border-color: rgba(255, 200, 87, 0.3);
+  color: var(--warn);
+  font-size: 13px;
 }
 
 /* ── Small phones (iPhone SE, etc.) ───────────────────── */

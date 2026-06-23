@@ -3,6 +3,7 @@ import type { ApprovalRequest, MemoryEntry, RunRecord } from '../shared/contract
 import {
   clearSession,
   DinoLinkClient,
+  formatLinkError,
   loadSession,
   saveSession,
   type NestStatus,
@@ -69,7 +70,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       set({
         connecting: false,
         connected: false,
-        error: err instanceof Error ? err.message : 'Pairing failed',
+        error: formatLinkError(err, nestUrl),
       })
     }
   },
@@ -123,7 +124,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         error: null,
       })
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Nest unreachable' })
+      set({ error: formatLinkError(err, get().nestUrl) })
     }
   },
 
@@ -138,7 +139,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       get().watchRun(enqueued.runId)
       await get().refresh()
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Failed to submit mission' })
+      set({ error: formatLinkError(err, get().nestUrl) })
     }
   },
 
@@ -159,7 +160,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       await client.resolveApproval(stepId, runId, approved)
       await get().refresh()
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : 'Approval failed' })
+      set({ error: formatLinkError(err, get().nestUrl) })
     }
   },
 
