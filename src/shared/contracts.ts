@@ -309,6 +309,79 @@ export interface BrowserSessionInfo {
 
 export type ServiceStatus = 'installed' | 'running' | 'stopped' | 'not_installed' | 'unknown'
 
+/* ─── Dino Stomp (autonomous beneficial care) ───────────── */
+
+export type StompAutonomy = 'off' | 'notes_only' | 'gentle' | 'helpful' | 'full'
+
+export type StompKind = 'note' | 'tidy' | 'document' | 'prepare'
+
+export type StompPresence = 'quiet' | 'thinking' | 'holding' | 'stomped'
+
+export interface StompConfig {
+  enabled: boolean
+  autonomy: StompAutonomy
+  tickSeconds: number
+  dailyNoteCap: number
+  dailyActionCap: number
+  minSpacingMs: number
+  idleFloorMs: number
+  quietHoursStart: number
+  quietHoursEnd: number
+  dismissStreakThreshold: number
+  dismissCooldownMs: number
+  salienceThreshold: number
+  topicCooldownMs: number
+  allowedPaths: string[]
+  watchPaths: string[]
+  watchEnabled: boolean
+}
+
+export interface StompTidyMove {
+  from: string
+  to: string
+}
+
+export interface StompJournalEntry {
+  id: string
+  kind: StompKind
+  title: string
+  body: string
+  topic: string
+  salience: number
+  surfacedAt: number
+  dismissedAt?: number
+  engagedAt?: number
+  filePath?: string
+  undoManifest?: StompTidyMove[]
+  undoneAt?: number
+  prepareGoal?: string
+}
+
+export interface TidyFolderPreview {
+  folder: string
+  label: string
+  looseCount: number
+  moveCount: number
+}
+
+export interface StompSnapshot {
+  config: StompConfig
+  journal: StompJournalEntry[]
+  presence: StompPresence
+  heldCount: number
+  dismissStreak: number
+  notesToday: number
+  actionsToday: number
+  lastStompAt?: number
+  phase: string
+}
+
+export interface StompUpdateEvent {
+  type: 'stomped' | 'presence' | 'journal'
+  entry?: StompJournalEntry
+  presence: StompPresence
+}
+
 /* ─── Snapshot ──────────────────────────────────────────── */
 
 export interface RuntimeSnapshot {
@@ -334,6 +407,7 @@ export interface RuntimeSnapshot {
   queueDepth: number
   activeRunId: string | null
   pendingApprovals: ApprovalRequest[]
+  stomp: StompSnapshot
 }
 
 /* ─── IPC Contracts ─────────────────────────────────────── */
@@ -423,4 +497,15 @@ export interface DinoClawApi {
   uninstallService: () => Promise<string>
   onStreamEvent: (callback: (event: StreamEvent) => void) => () => void
   onApprovalRequest: (callback: (request: ApprovalRequest) => void) => () => void
+  updateStompConfig: (config: Partial<StompConfig>) => Promise<StompSnapshot>
+  dismissStomp: (id: string) => Promise<StompSnapshot>
+  engageStomp: (id: string) => Promise<StompSnapshot>
+  stompNow: () => Promise<StompSnapshot>
+  stompTidyNow: () => Promise<StompSnapshot>
+  previewTidyFolders: () => Promise<TidyFolderPreview[]>
+  openStompFolder: (folderPath: string) => Promise<void>
+  openStompNotesDirectory: () => Promise<void>
+  undoStomp: (id: string) => Promise<StompSnapshot>
+  recordStompActivity: () => Promise<void>
+  onStompEvent: (callback: (event: StompUpdateEvent) => void) => () => void
 }

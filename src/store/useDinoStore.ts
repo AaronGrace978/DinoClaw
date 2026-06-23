@@ -13,6 +13,9 @@ import type {
   TunnelProvider,
   BrowserConfig,
   CronJobInfo,
+  StompConfig,
+  StompUpdateEvent,
+  TidyFolderPreview,
 } from '../shared/contracts'
 
 interface DinoStore extends RuntimeSnapshot {
@@ -54,10 +57,20 @@ interface DinoStore extends RuntimeSnapshot {
   updateBrowser: (config: BrowserConfig) => Promise<void>
   clearBrowserSession: () => Promise<void>
   clearError: () => void
+  updateStompConfig: (config: Partial<StompConfig>) => Promise<void>
+  dismissStomp: (id: string) => Promise<void>
+  engageStomp: (id: string) => Promise<void>
+  stompNow: () => Promise<void>
+  stompTidyNow: () => Promise<void>
+  previewTidyFolders: () => Promise<TidyFolderPreview[]>
+  openStompFolder: (folderPath: string) => Promise<void>
+  openStompNotesDirectory: () => Promise<void>
+  undoStomp: (id: string) => Promise<void>
 }
 
 let streamUnsubscribe: (() => void) | null = null
 let approvalUnsubscribe: (() => void) | null = null
+let stompUnsubscribe: (() => void) | null = null
 
 const emptySnapshot: RuntimeSnapshot = {
   creed: {
@@ -93,6 +106,33 @@ const emptySnapshot: RuntimeSnapshot = {
   queueDepth: 0,
   activeRunId: null,
   pendingApprovals: [],
+  stomp: {
+    config: {
+      enabled: true,
+      autonomy: 'notes_only',
+      tickSeconds: 300,
+      dailyNoteCap: 8,
+      dailyActionCap: 3,
+      minSpacingMs: 90 * 60 * 1000,
+      idleFloorMs: 5 * 60 * 1000,
+      quietHoursStart: 22,
+      quietHoursEnd: 7,
+      dismissStreakThreshold: 2,
+      dismissCooldownMs: 6 * 60 * 60 * 1000,
+      salienceThreshold: 0.55,
+      topicCooldownMs: 12 * 60 * 60 * 1000,
+      allowedPaths: [],
+      watchPaths: [],
+      watchEnabled: true,
+    },
+    journal: [],
+    presence: 'quiet',
+    heldCount: 0,
+    dismissStreak: 0,
+    notesToday: 0,
+    actionsToday: 0,
+    phase: 'v0.4',
+  },
 }
 
 async function fetchSnapshot(): Promise<RuntimeSnapshot> {
@@ -137,6 +177,21 @@ export const useDinoStore = create<DinoStore>((set) => ({
             : { approvalQueue: [...state.approvalQueue, request] }
         ))
       })
+
+      stompUnsubscribe?.()
+      stompUnsubscribe = window.dinoClaw.onStompEvent((event: StompUpdateEvent) => {
+        void fetchSnapshot().then(snapshot => {
+          set({ ...snapshot, approvalQueue: snapshot.pendingApprovals ?? [] })
+        })
+        if (event.type === 'stomped') {
+          set(state => ({ stomp: { ...state.stomp, presence: event.presence } }))
+        }
+      })
+
+      window.dinoClaw.recordStompActivity()
+      const activity = () => { void window.dinoClaw.recordStompActivity() }
+      window.addEventListener('pointerdown', activity)
+      window.addEventListener('keydown', activity)
     } catch (error) {
       set({ isLoading: false, error: error instanceof Error ? error.message : 'Failed to load' })
     }
@@ -311,6 +366,48 @@ export const useDinoStore = create<DinoStore>((set) => ({
     await window.dinoClaw.clearBrowserSession()
     const snapshot = await window.dinoClaw.getSnapshot()
     set({ ...snapshot })
+  },
+
+  updateStompConfig: async (config) => {
+    const stomp = await window.dinoClaw.updateStompConfig(config)
+    set(state => ({ ...state, stomp, error: null }))
+  },
+
+  dismissStomp: async (id) => {
+    const stomp = await window.dinoClaw.dismissStomp(id)
+    set(state => ({ ...state, stomp, error: null }))
+  },
+
+  engageStomp: async (id) => {
+    const stomp = await window.dinoClaw.engageStomp(id)
+    set(state => ({ ...state, stomp, error: null }))
+  },
+
+  stompNow: async () => {
+    const stomp = await window.dinoClaw.stompNow()
+    set(state => ({ ...state, stomp, error: null }))
+  },
+
+  stompTidyNow: async () => {
+    const stomp = await window.dinoClaw.stompTidyNow()
+    set(state => ({ ...state, stomp, error: null }))
+  },
+
+  previewTidyFolders: async () => {
+    return window.dinoClaw.previewTidyFolders()
+  },
+
+  openStompFolder: async (folderPath) => {
+    await window.dinoClaw.openStompFolder(folderPath)
+  },
+
+  openStompNotesDirectory: async () => {
+    await window.dinoClaw.openStompNotesDirectory()
+  },
+
+  undoStomp: async (id) => {
+    const stomp = await window.dinoClaw.undoStomp(id)
+    set(state => ({ ...state, stomp, error: null }))
   },
 
   clearError: () => set({ error: null }),

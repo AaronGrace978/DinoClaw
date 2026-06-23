@@ -39,10 +39,23 @@ html, body, #root {
 
 ::selection { background: rgba(0, 230, 138, 0.25); color: #fff; }
 
-button, input, textarea, select {
+button, input, textarea {
   font: inherit;
   color: inherit;
   outline: none;
+}
+
+select {
+  font: inherit;
+  outline: none;
+  color: var(--g);
+  background-color: var(--bg-1);
+  color-scheme: dark;
+}
+
+select option {
+  background-color: var(--bg-2);
+  color: var(--g);
 }
 
 button { cursor: pointer; }
