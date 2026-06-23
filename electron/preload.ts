@@ -47,6 +47,21 @@ const api: DinoClawApi = {
     ipcRenderer.on('dinoclaw:approvalRequest', handler)
     return () => ipcRenderer.removeListener('dinoclaw:approvalRequest', handler)
   },
+  updateStompConfig: (config) => ipcRenderer.invoke('dinoclaw:updateStompConfig', config),
+  dismissStomp: (id) => ipcRenderer.invoke('dinoclaw:dismissStomp', id),
+  engageStomp: (id) => ipcRenderer.invoke('dinoclaw:engageStomp', id),
+  stompNow: () => ipcRenderer.invoke('dinoclaw:stompNow'),
+  stompTidyNow: () => ipcRenderer.invoke('dinoclaw:stompTidyNow'),
+  previewTidyFolders: () => ipcRenderer.invoke('dinoclaw:previewTidyFolders'),
+  openStompFolder: (folderPath) => ipcRenderer.invoke('dinoclaw:openStompFolder', folderPath),
+  openStompNotesDirectory: () => ipcRenderer.invoke('dinoclaw:openStompNotesDirectory'),
+  undoStomp: (id) => ipcRenderer.invoke('dinoclaw:undoStomp', id),
+  recordStompActivity: () => ipcRenderer.invoke('dinoclaw:recordStompActivity'),
+  onStompEvent: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: unknown) => callback(data as Parameters<typeof callback>[0])
+    ipcRenderer.on('dinoclaw:stomp', handler)
+    return () => ipcRenderer.removeListener('dinoclaw:stomp', handler)
+  },
 }
 
 contextBridge.exposeInMainWorld('dinoClaw', api)
