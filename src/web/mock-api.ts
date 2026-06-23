@@ -109,6 +109,16 @@ export function installWebMock(): void {
     undoStomp: async () => stompFrom(),
     recordStompActivity: async () => {},
     onStompEvent: () => () => {},
+    getLinkSetup: async () => ({
+      lanIps: ['192.168.1.5'],
+      gatewayRunning: false,
+      gatewayPort: 42617,
+      pairingCode: '',
+      nestHttpUrl: null,
+      tunnelHttpsUrl: null,
+      linkLanUrl: 'http://192.168.1.5:8808/link.html',
+      pagesUrl: 'https://aarongrace978.github.io/DinoClaw/link.html',
+    }),
   }
 
   window.dinoClaw = api

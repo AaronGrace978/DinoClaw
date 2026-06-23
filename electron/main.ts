@@ -194,6 +194,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('dinoclaw:openStompNotesDirectory', () => runtime.openStompNotesDirectory())
   ipcMain.handle('dinoclaw:undoStomp', (_e, id: string) => runtime.undoStomp(id))
   ipcMain.handle('dinoclaw:recordStompActivity', () => runtime.recordStompUserActivity())
+  ipcMain.handle('dinoclaw:getLinkSetup', () => runtime.getLinkSetup())
 
   if (isDaemon) {
     void runtime.bootstrapNest({ daemon: true })

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
 import type {
@@ -13,6 +14,7 @@ import type {
   DinoCreed,
   ExecutionPolicy,
   GoalRequest,
+  LinkSetupInfo,
   MemoryCategory,
   MemoryEntry,
   MissionEnqueueResponse,
@@ -733,6 +735,35 @@ export class DinoRuntime {
   stopTunnel(): void {
     this.tunnel?.stop()
     this.tunnel = null
+  }
+
+  getLinkSetup(): LinkSetupInfo {
+    const lanIps = this.getLanIpv4Addresses()
+    const gateway = this.gateway.getInfo()
+    const tunnel = this.tunnel?.getInfo() ?? { running: false, url: '', provider: 'none' as const }
+    const primaryIp = lanIps[0] ?? null
+
+    return {
+      lanIps,
+      gatewayRunning: gateway.running,
+      gatewayPort: gateway.port,
+      pairingCode: this.gateway.getPairingCode(),
+      nestHttpUrl: gateway.running && primaryIp ? `http://${primaryIp}:${gateway.port}` : null,
+      tunnelHttpsUrl: tunnel.running && tunnel.url ? tunnel.url.replace(/\/$/, '') : null,
+      linkLanUrl: primaryIp ? `http://${primaryIp}:8808/link.html` : null,
+      pagesUrl: 'https://aarongrace978.github.io/DinoClaw/link.html',
+    }
+  }
+
+  private getLanIpv4Addresses(): string[] {
+    const ips: string[] = []
+    for (const ifaces of Object.values(os.networkInterfaces())) {
+      if (!ifaces) continue
+      for (const cfg of ifaces) {
+        if (cfg.family === 'IPv4' && !cfg.internal) ips.push(cfg.address)
+      }
+    }
+    return ips
   }
 
   updateBrowserConfig(config: BrowserConfigType): void {

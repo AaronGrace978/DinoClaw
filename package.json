@@ -14,6 +14,7 @@
     "build:pages": "tsc -p tsconfig.app.json && vite build --config vite.config.pages.ts && cross-env VITE_LINK_PAGES=true vite build --config vite.config.link.ts",
     "build:link": "tsc -p tsconfig.app.json && vite build --config vite.config.link.ts",
     "dev:link": "vite --config vite.config.link.ts",
+    "serve:link": "npm run build:link && vite preview --config vite.config.link.ts --host 0.0.0.0 --port 8808",
     "dist": "npm run build && electron-builder",
     "dist:portable": "npm run build && electron-builder --win portable",
     "dist:nsis": "npm run build && electron-builder --win nsis",

@@ -266,6 +266,17 @@ export interface GatewayNestConfig {
   bearerToken: string
 }
 
+export interface LinkSetupInfo {
+  lanIps: string[]
+  gatewayRunning: boolean
+  gatewayPort: number
+  pairingCode: string
+  nestHttpUrl: string | null
+  tunnelHttpsUrl: string | null
+  linkLanUrl: string | null
+  pagesUrl: string
+}
+
 /* ─── Dino Link (Nest + Limbs) ──────────────────────────── */
 
 export interface MissionSubmitRequest {
@@ -551,4 +562,5 @@ export interface DinoClawApi {
   undoStomp: (id: string) => Promise<StompSnapshot>
   recordStompActivity: () => Promise<void>
   onStompEvent: (callback: (event: StompUpdateEvent) => void) => () => void
+  getLinkSetup: () => Promise<LinkSetupInfo>
 }

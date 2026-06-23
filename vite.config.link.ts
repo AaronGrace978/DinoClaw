@@ -14,4 +14,8 @@ export default defineConfig({
       input: 'link.html',
     },
   },
+  preview: {
+    host: '0.0.0.0',
+    port: 8808,
+  },
 })

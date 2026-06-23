@@ -62,6 +62,7 @@ const api: DinoClawApi = {
     ipcRenderer.on('dinoclaw:stomp', handler)
     return () => ipcRenderer.removeListener('dinoclaw:stomp', handler)
   },
+  getLinkSetup: () => ipcRenderer.invoke('dinoclaw:getLinkSetup'),
 }
 
 contextBridge.exposeInMainWorld('dinoClaw', api)

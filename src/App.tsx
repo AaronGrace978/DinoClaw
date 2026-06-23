@@ -30,6 +30,7 @@ import {
   Square,
   Plus,
   Heart,
+  Smartphone,
 } from 'lucide-react'
 import type {
   DinoCreed,
@@ -40,6 +41,7 @@ import type {
   ToolRisk,
   StompPresence,
   TidyFolderPreview,
+  LinkSetupInfo,
 } from './shared/contracts'
 import { PROVIDER_DEFAULTS, OLLAMA_CLOUD_MODELS } from './shared/contracts'
 import { parseStompPathLines } from './shared/stomp-paths'
@@ -81,6 +83,7 @@ function App() {
   const [cronSchedule, setCronSchedule] = useState('')
   const [cronGoal, setCronGoal] = useState('')
   const [gatewayPairingCode, setGatewayPairingCode] = useState('')
+  const [linkSetup, setLinkSetup] = useState<LinkSetupInfo | null>(null)
   const [browserDomainsInput, setBrowserDomainsInput] = useState('')
   const [tidyPreview, setTidyPreview] = useState<TidyFolderPreview[]>([])
   const [tidyPreviewLoading, setTidyPreviewLoading] = useState(false)
@@ -103,6 +106,19 @@ function App() {
   }, [])
 
   useEffect(() => { void hydrate() }, [hydrate])
+
+  useEffect(() => {
+    if (tab !== 'infra' || !window.dinoClaw?.getLinkSetup) return
+    void window.dinoClaw.getLinkSetup().then(setLinkSetup)
+  }, [tab, store.gateway.running, store.gateway.paired, store.tunnel.running, store.tunnel.url, gatewayPairingCode])
+
+  const copyText = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      /* clipboard unavailable */
+    }
+  }, [])
 
   useEffect(() => {
     if (tab === 'stomp' || tab === 'dashboard') void refreshTidyPreview()
@@ -1060,6 +1076,61 @@ function App() {
                 <p className="infra-desc">REST API with pairing security. Endpoints: /health, /pair, /webhook, /status</p>
               </section>
 
+              {/* Dino Link (Phone) */}
+              <section className="card link-setup-card">
+                <h3 className="card-heading"><Smartphone size={14} /> Dino Link (Phone)</h3>
+                <p className="infra-desc link-setup-warn">
+                  GitHub Pages is HTTPS — it cannot reach an <code>http://</code> Nest. That is why you see &quot;failed to fetch&quot;.
+                </p>
+                {linkSetup?.gatewayRunning ? (
+                  <div className="link-setup-steps">
+                    <p className="link-setup-title">Easiest fix (same Wi‑Fi)</p>
+                    <ol className="link-setup-list">
+                      <li>
+                        On PC, open a <strong>second</strong> terminal in DinoClaw folder and run:
+                        <code className="link-setup-code">npm run serve:link</code>
+                      </li>
+                      <li>
+                        On phone, open:
+                        {linkSetup.linkLanUrl ? (
+                          <button type="button" className="link-setup-copy" onClick={() => void copyText(linkSetup.linkLanUrl!)}>
+                            <code>{linkSetup.linkLanUrl}</code>
+                          </button>
+                        ) : (
+                          <code>http://YOUR-PC-IP:8808/link.html</code>
+                        )}
+                      </li>
+                      <li>
+                        Nest URL:
+                        {linkSetup.tunnelHttpsUrl ? (
+                          <button type="button" className="link-setup-copy" onClick={() => void copyText(linkSetup.tunnelHttpsUrl!)}>
+                            <code>{linkSetup.tunnelHttpsUrl}</code> (tunnel)
+                          </button>
+                        ) : linkSetup.nestHttpUrl ? (
+                          <button type="button" className="link-setup-copy" onClick={() => void copyText(linkSetup.nestHttpUrl!)}>
+                            <code>{linkSetup.nestHttpUrl}</code>
+                          </button>
+                        ) : (
+                          <code>http://LAN-IP:42617</code>
+                        )}
+                      </li>
+                      <li>
+                        Pairing code:
+                        <code>{gatewayPairingCode || linkSetup.pairingCode || 'start gateway'}</code>
+                      </li>
+                    </ol>
+                    <p className="infra-desc">
+                      LAN IP{linkSetup.lanIps.length > 1 ? 's' : ''}: {linkSetup.lanIps.join(', ') || 'none found'}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="infra-desc">Start Gateway above first, then follow the phone steps.</p>
+                )}
+                <p className="infra-desc">
+                  Or install <code>cloudflared</code> (<code>winget install Cloudflare.cloudflared</code>), start Tunnel below, and use the <code>https://</code> URL with GitHub Pages Dino Link.
+                </p>
+              </section>
+
               {/* Telegram */}
               <section className="card">
                 <h3 className="card-heading"><Radio size={14} /> Telegram</h3>
@@ -1163,7 +1234,7 @@ function App() {
                     </button>
                   )}
                 </div>
-                <p className="infra-desc">Expose gateway via Cloudflare or ngrok tunnel.</p>
+                <p className="infra-desc">Expose gateway via Cloudflare or ngrok. Requires cloudflared/ngrok installed on PATH.</p>
               </section>
 
               {/* Docker */}
