@@ -34,7 +34,8 @@ if not exist "node_modules" (
     echo.
 )
 
-echo [START] Launching DinoClaw in dev mode...
+echo [START] Launching DinoClaw...
+echo         Wait ~5 seconds for the window to load.
 echo         Close this window to stop the app.
 echo.
 

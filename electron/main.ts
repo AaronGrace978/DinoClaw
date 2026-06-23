@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, Notification, nativeImage } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type {
@@ -18,6 +19,7 @@ const isDaemon = process.argv.includes('--daemon')
 const sessionDataPath = path.join(app.getPath('temp'), 'dinoclaw-session-data')
 const DEV_LOAD_RETRIES = 20
 const DEV_LOAD_RETRY_DELAY_MS = 250
+const DEV_SERVER_FALLBACK = 'http://127.0.0.1:5173/'
 app.setPath('sessionData', sessionDataPath)
 app.commandLine.appendSwitch('disk-cache-dir', path.join(sessionDataPath, 'cache'))
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
@@ -59,15 +61,11 @@ async function createWindow(): Promise<void> {
   })
 
   mainWindow.setMenuBarVisibility(false)
+  attachRendererDiagnostics(mainWindow)
 
-  mainWindow.on('close', (e) => {
-    if (tray && !isQuitting) {
-      e.preventDefault()
-      mainWindow?.hide()
-    }
-  })
-
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL
+  const devServerUrl = !app.isPackaged
+    ? (process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL || DEV_SERVER_FALLBACK)
+    : undefined
   try {
     await loadRenderer(mainWindow, devServerUrl)
   } catch (error) {
@@ -75,6 +73,13 @@ async function createWindow(): Promise<void> {
     console.error(`[main] Failed to load renderer: ${message}`)
     await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderBootstrapErrorHtml(message))}`)
   }
+
+  mainWindow.on('close', (e) => {
+    if (tray && !isQuitting) {
+      e.preventDefault()
+      mainWindow?.hide()
+    }
+  })
 }
 
 function createTray(): void {
@@ -217,7 +222,11 @@ app.on('before-quit', () => { isQuitting = true })
 
 async function loadRenderer(win: BrowserWindow, devServerUrl?: string): Promise<void> {
   if (!devServerUrl) {
-    await win.loadFile(path.join(__dirname, '../dist/index.html'))
+    const indexPath = path.join(__dirname, '../dist/index.html')
+    if (!fs.existsSync(indexPath)) {
+      throw new Error('Production UI missing. Run: npm run build')
+    }
+    await win.loadFile(indexPath)
     return
   }
 
@@ -275,4 +284,20 @@ function escapeHtml(value: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function attachRendererDiagnostics(win: BrowserWindow): void {
+  if (app.isPackaged) return
+
+  win.webContents.on('console-message', (_event, level, message) => {
+    console.log(`[renderer:${level}] ${message}`)
+  })
+
+  win.webContents.on('did-fail-load', (_event, code, description, url) => {
+    console.error(`[renderer] Failed to load ${url} (${code}): ${description}`)
+  })
+
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[renderer] Process gone: ${details.reason}`)
+  })
 }
