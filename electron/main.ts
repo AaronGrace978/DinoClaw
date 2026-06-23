@@ -9,6 +9,7 @@ import type {
   Skill,
   TunnelProvider,
   BrowserConfig,
+  StompConfig,
 } from '../src/shared/contracts'
 import { DinoRuntime } from './runtime'
 
@@ -176,7 +177,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('dinoclaw:installService', () => runtime.installService())
   ipcMain.handle('dinoclaw:uninstallService', () => runtime.uninstallService())
 
+  // Dino Stomp
+  ipcMain.handle('dinoclaw:updateStompConfig', (_e, config: Partial<StompConfig>) =>
+    runtime.updateStompConfig(config))
+  ipcMain.handle('dinoclaw:dismissStomp', (_e, id: string) => runtime.dismissStomp(id))
+  ipcMain.handle('dinoclaw:engageStomp', (_e, id: string) => runtime.engageStomp(id))
+  ipcMain.handle('dinoclaw:stompNow', () => runtime.stompNow())
+  ipcMain.handle('dinoclaw:stompTidyNow', () => runtime.stompTidyNow())
+  ipcMain.handle('dinoclaw:previewTidyFolders', () => runtime.previewTidyFolders())
+  ipcMain.handle('dinoclaw:openStompFolder', (_e, folderPath: string) => runtime.openStompFolder(folderPath))
+  ipcMain.handle('dinoclaw:openStompNotesDirectory', () => runtime.openStompNotesDirectory())
+  ipcMain.handle('dinoclaw:undoStomp', (_e, id: string) => runtime.undoStomp(id))
+  ipcMain.handle('dinoclaw:recordStompActivity', () => runtime.recordStompUserActivity())
+
   if (isDaemon) {
+    void runtime.bootstrapNest({ daemon: true })
     return
   }
 

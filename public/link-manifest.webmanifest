@@ -1,0 +1,27 @@
+{
+  "name": "Dino Link",
+  "short_name": "Dino Link",
+  "description": "Your dino's pocket — same memory, same creed, remote to your Nest.",
+  "start_url": "link.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#080e12",
+  "theme_color": "#080e12",
+  "orientation": "portrait-primary",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "dino.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "dino.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

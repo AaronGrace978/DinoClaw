@@ -7,13 +7,22 @@ import type {
   CronJobInfo,
   DinoCreed,
   ExecutionPolicy,
+  GatewayNestConfig,
   MemoryEntry,
   ModelSettings,
   RunQueueItem,
   RunRecord,
   Skill,
   AuditEntry,
+  StompConfig,
+  StompJournalEntry,
 } from '../src/shared/contracts'
+import {
+  DEFAULT_STOMP_CONFIG,
+  DEFAULT_STOMP_RUNTIME,
+  type StompRuntimeState,
+} from './dino-stomp-types'
+import { expandConfiguredPaths } from './stomp-tidy'
 import { defaultCreed } from './creed'
 import { DEFAULT_BROWSER_CONFIG } from './browser-tool'
 import { DEFAULT_DOCKER_CONFIG, type DockerConfig } from './docker-runtime'
@@ -35,7 +44,11 @@ export interface PersistedState {
   approvalDecisions: Record<string, boolean>
   cronJobs: CronJobInfo[]
   channelConfig: ChannelConfig
+  gatewayConfig: GatewayNestConfig
   dockerConfig: DockerConfig
+  stompConfig: StompConfig
+  stompJournal: StompJournalEntry[]
+  stompRuntime: StompRuntimeState
 }
 
 const DEFAULT_STATE: PersistedState = {
@@ -70,7 +83,15 @@ const DEFAULT_STATE: PersistedState = {
     telegram: { botToken: '', allowedUsers: [], enabled: false },
     discord: { botToken: '', allowedUsers: [], enabled: false },
   },
+  gatewayConfig: {
+    autoStart: false,
+    port: 42617,
+    bearerToken: '',
+  },
   dockerConfig: { ...DEFAULT_DOCKER_CONFIG },
+  stompConfig: { ...DEFAULT_STOMP_CONFIG },
+  stompJournal: [],
+  stompRuntime: { ...DEFAULT_STOMP_RUNTIME },
 }
 
 export function createStorage(dataDir: string) {
@@ -100,7 +121,11 @@ export function createStorage(dataDir: string) {
         approvalDecisions: parsed.approvalDecisions ?? {},
         cronJobs: parsed.cronJobs ?? [],
         channelConfig: parsed.channelConfig ?? structuredClone(DEFAULT_STATE.channelConfig),
+        gatewayConfig: parsed.gatewayConfig ?? structuredClone(DEFAULT_STATE.gatewayConfig),
         dockerConfig: parsed.dockerConfig ?? structuredClone(DEFAULT_STATE.dockerConfig),
+        stompConfig: parsed.stompConfig ?? structuredClone(DEFAULT_STATE.stompConfig),
+        stompJournal: parsed.stompJournal ?? [],
+        stompRuntime: parsed.stompRuntime ?? structuredClone(DEFAULT_STATE.stompRuntime),
       })
     } catch {
       return structuredClone(DEFAULT_STATE)
@@ -180,6 +205,11 @@ function migrate(state: PersistedState): PersistedState {
   if (!Array.isArray(state.channelConfig.telegram.allowedUsers)) state.channelConfig.telegram.allowedUsers = []
   if (!Array.isArray(state.channelConfig.discord.allowedUsers)) state.channelConfig.discord.allowedUsers = []
 
+  if (!state.gatewayConfig) state.gatewayConfig = structuredClone(DEFAULT_STATE.gatewayConfig)
+  if (typeof state.gatewayConfig.autoStart !== 'boolean') state.gatewayConfig.autoStart = false
+  if (!state.gatewayConfig.port) state.gatewayConfig.port = DEFAULT_STATE.gatewayConfig.port
+  if (!state.gatewayConfig.bearerToken) state.gatewayConfig.bearerToken = ''
+
   if (!state.dockerConfig) state.dockerConfig = structuredClone(DEFAULT_STATE.dockerConfig)
   if (typeof state.dockerConfig.enabled !== 'boolean') state.dockerConfig.enabled = DEFAULT_STATE.dockerConfig.enabled
   if (!state.dockerConfig.image) state.dockerConfig.image = DEFAULT_STATE.dockerConfig.image
@@ -199,6 +229,20 @@ function migrate(state: PersistedState): PersistedState {
     if (!Array.isArray(skill.recovery)) skill.recovery = []
     if (!Array.isArray(skill.outputStyle)) skill.outputStyle = []
     if (!Array.isArray(skill.examples)) skill.examples = []
+  }
+
+  if (!state.stompConfig) state.stompConfig = structuredClone(DEFAULT_STATE.stompConfig)
+  if (!Array.isArray(state.stompJournal)) state.stompJournal = []
+  if (!state.stompRuntime) state.stompRuntime = structuredClone(DEFAULT_STATE.stompRuntime)
+  if (!state.stompRuntime.topicPings) state.stompRuntime.topicPings = []
+  if (!Array.isArray(state.stompConfig.allowedPaths)) state.stompConfig.allowedPaths = []
+  if (!Array.isArray(state.stompConfig.watchPaths)) state.stompConfig.watchPaths = []
+  if (typeof state.stompConfig.watchEnabled !== 'boolean') state.stompConfig.watchEnabled = true
+  if (state.stompConfig.allowedPaths.length > 0) {
+    state.stompConfig.allowedPaths = expandConfiguredPaths(state.stompConfig.allowedPaths)
+  }
+  if (state.stompConfig.watchPaths.length > 0) {
+    state.stompConfig.watchPaths = expandConfiguredPaths(state.stompConfig.watchPaths)
   }
 
   return state

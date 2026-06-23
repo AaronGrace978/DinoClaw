@@ -260,6 +260,49 @@ export interface GatewayStatus {
   paired: boolean
 }
 
+export interface GatewayNestConfig {
+  autoStart: boolean
+  port: number
+  bearerToken: string
+}
+
+/* ─── Dino Link (Nest + Limbs) ──────────────────────────── */
+
+export interface MissionSubmitRequest {
+  goal: string
+  context?: string
+  /** When true, blocks until the run completes (legacy /webhook behavior). Default false. */
+  wait?: boolean
+  idempotencyKey?: string
+}
+
+export interface MissionEnqueueResponse {
+  runId: string
+  status: 'queued'
+  queuePosition: number
+}
+
+export interface MissionStatusResponse {
+  run: RunRecord
+  queuePosition: number | null
+  isActive: boolean
+}
+
+export interface MissionListResponse {
+  activeRunId: string | null
+  queue: Array<{ runId: string; goal: string; createdAt: number }>
+  recent: RunRecord[]
+}
+
+export interface ApprovalResolveRequest {
+  runId: string
+  approved: boolean
+}
+
+export interface ApprovalListResponse {
+  pending: ApprovalRequest[]
+}
+
 /* ─── Docker Sandbox ────────────────────────────────────── */
 
 export interface DockerStatus {

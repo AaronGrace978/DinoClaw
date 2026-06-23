@@ -15,6 +15,9 @@ import type {
   GoalRequest,
   MemoryCategory,
   MemoryEntry,
+  MissionEnqueueResponse,
+  MissionListResponse,
+  MissionStatusResponse,
   ModelSettings,
   RunGoalResponse,
   RunQueueItem,
@@ -29,10 +32,13 @@ import type {
   ToolName,
   ToolResult,
   TunnelProvider,
+  StompConfig,
+  StompSnapshot,
 } from '../src/shared/contracts'
 import { buildSystemPrompt, deriveMood } from './creed'
 import { callModel } from './provider'
 import { createStorage, type PersistedState } from './storage'
+import { DinoStomp } from './dino-stomp'
 import {
   executeTool,
   getBrowserSession,
@@ -186,6 +192,8 @@ export class DinoRuntime {
   private pendingRunResolvers = new Map<string, (response: RunGoalResponse) => void>()
   private cancelledRunIds = new Set<string>()
   private queueProcessing = false
+  private approvalListeners = new Set<(request: ApprovalRequest) => void>()
+  private streamListeners = new Set<(event: StreamEvent) => void>()
   private dockerAvailable = false
   private serviceStatus: ServiceStatus = 'unknown'
 
@@ -193,6 +201,7 @@ export class DinoRuntime {
   readonly channels: ChannelManager
   readonly scheduler: Scheduler
   readonly docker: DockerSandbox
+  readonly stomp: DinoStomp
   private tunnel: TunnelManager | null = null
   private readonly serviceManager: ServiceManager
   private browserConfig: BrowserConfigType
@@ -218,10 +227,49 @@ export class DinoRuntime {
     this.state.creed.mood = deriveMood(this.state.runs.slice(-5))
 
     this.gateway = new Gateway(this)
+    this.gateway.setOnPaired(token => {
+      this.state.gatewayConfig.bearerToken = token
+      this.state.gatewayConfig.autoStart = true
+      this.persist()
+    })
+    if (this.state.gatewayConfig.bearerToken) {
+      this.gateway.restoreBearerToken(this.state.gatewayConfig.bearerToken)
+    }
     this.channels = new ChannelManager(this)
     this.scheduler = new Scheduler(this, jobs => this.syncCronJobs(jobs))
     this.docker = new DockerSandbox(this.state.dockerConfig)
     this.serviceManager = new ServiceManager()
+
+    this.stomp = new DinoStomp({
+      dataDir: this.dataDir,
+      getState: () => this.state,
+      getContext: () => {
+        const stats = this.computeStats()
+        const cfg = this.state.stompConfig
+        return {
+          creed: this.state.creed,
+          runs: this.state.runs,
+          memory: this.state.memory,
+          runsToday: stats.runsToday,
+          successRate: stats.successRate,
+          activeRunId: this.state.activeRunId,
+          queueDepth: this.state.runQueue.length,
+          idleMs: 0,
+          hourLocal: new Date().getHours(),
+          memoryCount: stats.memoryCount,
+          autonomy: cfg?.autonomy ?? 'notes_only',
+          allowedPaths: cfg?.allowedPaths ?? [],
+          watchPaths: cfg?.watchPaths ?? [],
+          watchEnabled: cfg?.watchEnabled !== false,
+        }
+      },
+      persist: patch => {
+        if (patch.stompConfig) this.state.stompConfig = patch.stompConfig
+        if (patch.stompJournal) this.state.stompJournal = patch.stompJournal
+        if (patch.stompRuntime) this.state.stompRuntime = patch.stompRuntime
+        this.persist()
+      },
+    })
 
     setDockerSandbox(this.docker)
     setBrowserConfig(this.browserConfig)
@@ -235,6 +283,7 @@ export class DinoRuntime {
     void this.refreshDockerAvailability()
     void this.refreshServiceStatus()
     void this.restoreChannelConnections()
+    this.stomp.start()
     this.kickQueue()
   }
 
@@ -267,7 +316,51 @@ export class DinoRuntime {
       queueDepth: this.state.runQueue.length,
       activeRunId: this.state.activeRunId,
       pendingApprovals: this.state.pendingApprovals,
+      stomp: this.stomp.getSnapshot(),
     }
+  }
+
+  updateStompConfig(config: Partial<StompConfig>): StompSnapshot {
+    return this.stomp.updateConfig(config)
+  }
+
+  dismissStomp(id: string): StompSnapshot {
+    return this.stomp.dismissEntry(id)
+  }
+
+  engageStomp(id: string): StompSnapshot {
+    return this.stomp.engageEntry(id)
+  }
+
+  async stompNow(): Promise<StompSnapshot> {
+    this.stomp.recordUserActivity()
+    return this.stomp.stompNow()
+  }
+
+  async stompTidyNow(): Promise<StompSnapshot> {
+    this.stomp.recordUserActivity()
+    return this.stomp.stompTidyNow()
+  }
+
+  previewTidyFolders(): ReturnType<DinoStomp['previewTidy']> {
+    return this.stomp.previewTidy()
+  }
+
+  async openStompFolder(folderPath: string): Promise<void> {
+    await shell.openPath(folderPath)
+  }
+
+  recordStompUserActivity(): void {
+    this.stomp.recordUserActivity()
+  }
+
+  async openStompNotesDirectory(): Promise<void> {
+    const dir = this.stomp.openNotesDirectory()
+    await shell.openPath(dir)
+  }
+
+  undoStomp(id: string): StompSnapshot {
+    return this.stomp.undoEntry(id)
   }
 
   updateCreed(creed: DinoCreed): RuntimeSnapshot {
@@ -291,10 +384,68 @@ export class DinoRuntime {
   async runGoal(request: GoalRequest): Promise<RunGoalResponse> {
     const goal = request.goal.trim()
     if (!goal) throw new Error('Goal cannot be empty.')
-
     if (STOP_GOALS.has(goal.toLowerCase())) {
       return this.stopActiveRuns(goal)
     }
+
+    const { run } = this.queueGoal(request)
+    return await new Promise<RunGoalResponse>(resolve => {
+      this.pendingRunResolvers.set(run.id, resolve)
+    })
+  }
+
+  enqueueGoal(request: GoalRequest): MissionEnqueueResponse {
+    const goal = request.goal.trim()
+    if (!goal) throw new Error('Goal cannot be empty.')
+    if (STOP_GOALS.has(goal.toLowerCase())) {
+      const response = this.stopActiveRuns(goal)
+      return { runId: response.run.id, status: 'queued', queuePosition: 0 }
+    }
+
+    const { run, queuePosition } = this.queueGoal(request)
+    return { runId: run.id, status: 'queued', queuePosition }
+  }
+
+  getMissionStatus(runId: string): MissionStatusResponse | null {
+    const run = this.state.runs.find(r => r.id === runId)
+    if (!run) return null
+    const queueIndex = this.state.runQueue.findIndex(item => item.runId === runId)
+    return {
+      run,
+      queuePosition: queueIndex >= 0 ? queueIndex + 1 : null,
+      isActive: this.state.activeRunId === runId,
+    }
+  }
+
+  getMissionList(limit = 20): MissionListResponse {
+    const recent = this.state.runs
+      .filter(r => !STOP_GOALS.has(r.goal.toLowerCase()))
+      .slice(-limit)
+      .reverse()
+    return {
+      activeRunId: this.state.activeRunId,
+      queue: this.state.runQueue.map(item => ({
+        runId: item.runId,
+        goal: item.goal,
+        createdAt: item.createdAt,
+      })),
+      recent,
+    }
+  }
+
+  subscribeApprovalRequest(listener: (request: ApprovalRequest) => void): () => void {
+    this.approvalListeners.add(listener)
+    return () => { this.approvalListeners.delete(listener) }
+  }
+
+  subscribeStreamEvent(listener: (event: StreamEvent) => void): () => void {
+    this.streamListeners.add(listener)
+    return () => { this.streamListeners.delete(listener) }
+  }
+
+  private queueGoal(request: GoalRequest): { run: RunRecord; queuePosition: number } {
+    this.stomp.recordUserActivity()
+    const goal = request.goal.trim()
 
     const run: RunRecord = {
       id: randomUUID(),
@@ -323,9 +474,7 @@ export class DinoRuntime {
     this.persist()
     this.kickQueue()
 
-    return await new Promise<RunGoalResponse>(resolve => {
-      this.pendingRunResolvers.set(run.id, resolve)
-    })
+    return { run, queuePosition: this.state.runQueue.length }
   }
 
   private stopActiveRuns(goal = 'stop'): RunGoalResponse {
@@ -482,7 +631,50 @@ export class DinoRuntime {
   }
 
   async startGateway(port: number): Promise<{ port: number; pairingCode: string }> {
-    return this.gateway.start(port)
+    if (this.state.gatewayConfig.bearerToken) {
+      this.gateway.restoreBearerToken(this.state.gatewayConfig.bearerToken)
+    }
+    const result = await this.gateway.start(port, { preserveToken: true })
+    this.state.gatewayConfig.port = result.port
+    this.state.gatewayConfig.autoStart = true
+    this.persist()
+    return result
+  }
+
+  async bootstrapNest(options: { daemon?: boolean } = {}): Promise<void> {
+    const cfg = this.state.gatewayConfig
+    const shouldStart = Boolean(options.daemon) || cfg.autoStart
+    if (!shouldStart || this.gateway.isRunning()) return
+
+    if (cfg.bearerToken) {
+      this.gateway.restoreBearerToken(cfg.bearerToken)
+    }
+
+    try {
+      const result = await this.gateway.start(cfg.port, { preserveToken: true })
+      this.state.gatewayConfig.port = result.port
+      if (options.daemon) {
+        this.state.gatewayConfig.autoStart = true
+      }
+      this.persist()
+
+      if (result.pairingCode) {
+        const hintPath = path.join(this.dataDir, 'link-pairing-code.txt')
+        const hint = [
+          'Dino Link pairing code (valid until paired):',
+          result.pairingCode,
+          '',
+          `Gateway: http://${this.gateway.getInfo().host}:${result.port}`,
+          'Open Dino Link on your phone and enter this code.',
+        ].join('\n')
+        fs.writeFileSync(hintPath, hint, 'utf8')
+        console.log(`[Dino Link] Pairing code: ${result.pairingCode} (also in ${hintPath})`)
+      } else {
+        console.log(`[Dino Link] Nest listening on :${result.port} (paired)`)
+      }
+    } catch (err) {
+      console.error('[Dino Link] Failed to start gateway:', err instanceof Error ? err.message : err)
+    }
   }
 
   stopGateway(): void {
@@ -1245,6 +1437,9 @@ export class DinoRuntime {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('dinoclaw:stream', event)
     }
+    for (const listener of this.streamListeners) {
+      try { listener(event) } catch { /* limb listener error */ }
+    }
   }
 
   private emitApprovalRequest(request: ApprovalRequest): void {
@@ -1252,6 +1447,9 @@ export class DinoRuntime {
       win.webContents.send('dinoclaw:approvalRequest', request)
     }
     this.emitNotification('Approval Needed', `${request.toolName} (${request.risk})`)
+    for (const listener of this.approvalListeners) {
+      try { listener(request) } catch { /* limb listener error */ }
+    }
   }
 
   private emitNotification(title: string, body: string): void {

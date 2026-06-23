@@ -1,8 +1,9 @@
-import { Download, X } from 'lucide-react'
+import { Download, Smartphone, X } from 'lucide-react'
 import { useState } from 'react'
 
 const RELEASE_URL = 'https://github.com/AaronGrace978/DinoClaw/releases/latest'
 const REPO_URL = 'https://github.com/AaronGrace978/DinoClaw'
+const LINK_URL = `${import.meta.env.BASE_URL}link.html`
 
 export default function WebPreviewBanner() {
   const [dismissed, setDismissed] = useState(
@@ -19,7 +20,11 @@ export default function WebPreviewBanner() {
           tools, Discord/Telegram, and desktop copilot.
         </span>
         <div className="web-preview-banner-actions">
-          <a className="web-preview-btn primary" href={RELEASE_URL} target="_blank" rel="noreferrer">
+          <a className="web-preview-btn primary" href={LINK_URL}>
+            <Smartphone size={14} />
+            Dino Link
+          </a>
+          <a className="web-preview-btn" href={RELEASE_URL} target="_blank" rel="noreferrer">
             <Download size={14} />
             Download
           </a>
