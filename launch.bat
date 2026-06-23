@@ -4,7 +4,7 @@ color 0A
 
 echo.
 echo   ====================================
-echo     DinoClaw - Desktop AI Agent v0.2
+echo     DinoClaw - Desktop AI Agent v0.4
 echo   ====================================
 echo.
 
@@ -34,9 +34,21 @@ if not exist "node_modules" (
     echo.
 )
 
+REM Stop a stale dev server if launch.bat was run again
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":5173" ^| findstr "LISTENING"') do (
+    echo [CLEANUP] Stopping stale process on port 5173 ^(PID %%a^)...
+    taskkill /PID %%a /F /T >nul 2>&1
+)
+
 echo [START] Launching DinoClaw...
 echo         Wait ~5 seconds for the window to load.
 echo         Close this window to stop the app.
 echo.
 
 call npm run dev
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] DinoClaw failed to start. See errors above.
+    pause
+    exit /b 1
+)
