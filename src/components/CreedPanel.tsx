@@ -81,7 +81,7 @@ export default function CreedPanel({ creed, creedDraft, onEdit, onSave }: CreedP
     <div className="creed-panel">
       <div className="creed-header">
         <div className="creed-dino-icon">
-          <img src="/dino.svg" alt="DinoClaw" width={40} height={40} />
+          <img src={`${import.meta.env.BASE_URL}dino.svg`} alt="DinoClaw" width={40} height={40} />
         </div>
         <h1 className="creed-title">THE CREED</h1>
         <p className="creed-subtitle">

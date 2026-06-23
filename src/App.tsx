@@ -29,6 +29,7 @@ import {
   Play,
   Square,
   Plus,
+  Heart,
 } from 'lucide-react'
 import type {
   DinoCreed,
@@ -37,14 +38,32 @@ import type {
   ApprovalRequest,
   ExecutionMode,
   ToolRisk,
+  StompPresence,
+  TidyFolderPreview,
 } from './shared/contracts'
 import { PROVIDER_DEFAULTS, OLLAMA_CLOUD_MODELS } from './shared/contracts'
+import { parseStompPathLines } from './shared/stomp-paths'
 import CreedPanel from './components/CreedPanel'
+import WebPreviewBanner from './components/WebPreviewBanner'
 import { useDinoStore } from './store/useDinoStore'
 import './App.css'
 
-type Tab = 'dashboard' | 'mission' | 'creed' | 'memory' | 'skills' | 'infra' | 'settings'
-const TABS: Tab[] = ['dashboard', 'mission', 'creed', 'memory', 'skills', 'infra', 'settings']
+type Tab = 'dashboard' | 'mission' | 'creed' | 'memory' | 'stomp' | 'skills' | 'infra' | 'settings'
+const TABS: Tab[] = ['dashboard', 'mission', 'creed', 'memory', 'stomp', 'skills', 'infra', 'settings']
+const DINO_ICON = `${import.meta.env.BASE_URL}dino.svg`
+
+function stompPresenceLabel(presence: StompPresence): string {
+  switch (presence) {
+    case 'thinking': return 'Thinking…'
+    case 'holding': return 'Holding a helpful thought'
+    case 'stomped': return 'Happy stomp! 🦖'
+    default: return 'Quiet — watching the nest'
+  }
+}
+
+function stompCanTidy(autonomy: string): boolean {
+  return autonomy === 'gentle' || autonomy === 'helpful' || autonomy === 'full'
+}
 
 function App() {
   const store = useDinoStore()
@@ -63,8 +82,31 @@ function App() {
   const [cronGoal, setCronGoal] = useState('')
   const [gatewayPairingCode, setGatewayPairingCode] = useState('')
   const [browserDomainsInput, setBrowserDomainsInput] = useState('')
+  const [tidyPreview, setTidyPreview] = useState<TidyFolderPreview[]>([])
+  const [tidyPreviewLoading, setTidyPreviewLoading] = useState(false)
+
+  const refreshTidyPreview = useCallback(async () => {
+    if (!window.dinoClaw?.previewTidyFolders) return
+    setTidyPreviewLoading(true)
+    try {
+      setTidyPreview(await window.dinoClaw.previewTidyFolders())
+    } catch {
+      setTidyPreview([])
+    } finally {
+      setTidyPreviewLoading(false)
+    }
+  }, [])
+
+  const launchMission = useCallback((missionGoal: string) => {
+    setGoal(missionGoal)
+    setTab('mission')
+  }, [])
 
   useEffect(() => { void hydrate() }, [hydrate])
+
+  useEffect(() => {
+    if (tab === 'stomp' || tab === 'dashboard') void refreshTidyPreview()
+  }, [tab, store.stomp.config.allowedPaths, store.stomp.config.autonomy, refreshTidyPreview])
 
   const browserDomainsKey = useMemo(() => store.browser.allowedDomains.join(','), [store.browser.allowedDomains])
   useEffect(() => {
@@ -184,7 +226,7 @@ function App() {
     return (
       <div className="boot">
         <div className="boot-glow" />
-        <img src="/dino.svg" alt="" width={64} height={64} className="boot-dino" />
+        <img src={DINO_ICON} alt="" width={64} height={64} className="boot-dino" />
         <span className="boot-text">DINOCLAW</span>
         <span className="boot-sub">AI for Regular People</span>
         <span className="boot-org">BostonAi.io</span>
@@ -194,6 +236,7 @@ function App() {
 
   return (
     <div className="shell">
+      {import.meta.env.VITE_WEB_PREVIEW === 'true' && <WebPreviewBanner />}
       <div className="ambient-tl" />
       <div className="ambient-br" />
 
@@ -208,7 +251,7 @@ function App() {
 
       <header className="topbar">
         <div className="topbar-brand">
-          <img src="/dino.svg" alt="" width={28} height={28} />
+          <img src={DINO_ICON} alt="" width={28} height={28} />
           <span className="topbar-name">DinoClaw</span>
           <span className="topbar-tag">v0.3</span>
           <span className="topbar-org">BostonAi.io</span>
@@ -220,6 +263,7 @@ function App() {
             ['mission', Zap, 'Mission'],
             ['creed', ScrollText, 'Creed'],
             ['memory', Brain, 'Memory'],
+            ['stomp', Heart, 'Stomp'],
             ['skills', Package, 'Skills'],
             ['infra', Server, 'Infra'],
             ['settings', Settings, 'Settings'],
@@ -286,6 +330,43 @@ function App() {
             </div>
 
             <div className="dash-grid">
+              <section className="card stomp-presence-card">
+                <h3 className="card-heading"><Heart size={14} /> Dino Stomp</h3>
+                <div className={`stomp-orb stomp-orb-${store.stomp.presence}`} title={stompPresenceLabel(store.stomp.presence)} />
+                <p className="stomp-presence-text">{stompPresenceLabel(store.stomp.presence)}</p>
+                <p className="stomp-presence-sub">
+                  {store.stomp.config.enabled
+                    ? `${store.stomp.notesToday} note${store.stomp.notesToday === 1 ? '' : 's'} · ${store.stomp.actionsToday} action${store.stomp.actionsToday === 1 ? '' : 's'} today · ${store.stomp.config.autonomy.replace('_', ' ')}`
+                    : 'Autonomous care is off'}
+                </p>
+                <div className="stomp-presence-actions">
+                  <button
+                    className="btn-primary btn-sm"
+                    disabled={!store.stomp.config.enabled}
+                    onClick={() => void store.stompNow()}
+                  >
+                    Stomp now 🦖
+                  </button>
+                  {stompCanTidy(store.stomp.config.autonomy) && tidyPreview.length > 0 && (
+                    <button
+                      className="btn-ghost btn-sm"
+                      disabled={!store.stomp.config.enabled}
+                      onClick={() => void store.stompTidyNow().then(() => refreshTidyPreview())}
+                    >
+                      Tidy now 📁
+                    </button>
+                  )}
+                  <button className="btn-ghost btn-sm" onClick={() => setTab('stomp')}>
+                    Journal
+                  </button>
+                </div>
+                {tidyPreview.length > 0 && (
+                  <p className="stomp-folder-health-hint">
+                    {tidyPreview[0].label}: {tidyPreview[0].looseCount} loose files ready to sort
+                  </p>
+                )}
+              </section>
+
               <section className="card">
                 <h3 className="card-heading"><Activity size={14} /> Tool Usage</h3>
                 {Object.keys(store.stats.toolUsage).length > 0 ? (
@@ -583,6 +664,257 @@ function App() {
               </div>
             ) : (
               <div className="card"><div className="empty">No memories stored yet. DinoClaw learns as it runs.</div></div>
+            )}
+          </div>
+        )}
+
+        {/* ── DINO STOMP ─────────────────────────── */}
+        {tab === 'stomp' && (
+          <div className="page-scroll">
+            <section className="page-header">
+              <Heart size={32} className="hero-icon" />
+              <h1>Dino Stomp</h1>
+              <p>
+                Autonomous beneficial care — notes, random check-ins on your folders, gentle tidying, daily logs.
+                *happy stomps* 🦖❤️ · Phase {store.stomp.phase}
+              </p>
+            </section>
+
+            <div className="stomp-toolbar">
+              <div className={`stomp-orb stomp-orb-${store.stomp.presence}`} />
+              <div className="stomp-toolbar-copy">
+                <strong>{stompPresenceLabel(store.stomp.presence)}</strong>
+                <span>
+                  {store.stomp.heldCount > 0
+                    ? `${store.stomp.heldCount} held thought${store.stomp.heldCount === 1 ? '' : 's'} waiting for a good moment`
+                    : 'Dino checks in when it helps — never when you\'re busy.'}
+                </span>
+              </div>
+              <button
+                className="btn-primary"
+                disabled={!store.stomp.config.enabled}
+                onClick={() => void store.stompNow()}
+              >
+                Stomp now 🦖
+              </button>
+              {stompCanTidy(store.stomp.config.autonomy) && (
+                <button
+                  className="btn-ghost"
+                  disabled={!store.stomp.config.enabled || tidyPreview.length === 0}
+                  title={tidyPreview.length === 0 ? 'No cluttered folders in your tidy list' : 'Sort loose files into DinoSorted/'}
+                  onClick={() => void store.stompTidyNow().then(() => refreshTidyPreview())}
+                >
+                  Tidy now 📁
+                </button>
+              )}
+              <button className="btn-ghost" onClick={() => void store.openStompNotesDirectory()}>
+                <FolderOpen size={14} /> Notes folder
+              </button>
+            </div>
+
+            {stompCanTidy(store.stomp.config.autonomy) && (
+              <div className="card stomp-health-card">
+                <div className="stomp-health-head">
+                  <h3 className="card-heading">Folder health</h3>
+                  <button
+                    className="btn-ghost btn-sm"
+                    disabled={tidyPreviewLoading}
+                    onClick={() => void refreshTidyPreview()}
+                  >
+                    Refresh
+                  </button>
+                </div>
+                {tidyPreviewLoading ? (
+                  <p className="infra-desc">Scanning tidy folders…</p>
+                ) : tidyPreview.length > 0 ? (
+                  <ul className="stomp-health-list">
+                    {tidyPreview.map(item => (
+                      <li key={item.folder} className="stomp-health-item">
+                        <div className="stomp-health-copy">
+                          <strong>{item.label}</strong>
+                          <span>{item.looseCount} loose · up to {item.moveCount} moves</span>
+                        </div>
+                        <button
+                          className="btn-ghost btn-sm"
+                          onClick={() => void store.openStompFolder(item.folder)}
+                        >
+                          Open
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="infra-desc">
+                    No cluttered folders right now — or add paths under <strong>Tidy folders</strong> below.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="card stomp-settings-inline">
+              <label className="stomp-toggle">
+                <input
+                  type="checkbox"
+                  checked={store.stomp.config.enabled}
+                  onChange={e => void store.updateStompConfig({ enabled: e.target.checked })}
+                />
+                <span>Enable Dino Stomp (autonomous notes)</span>
+              </label>
+              <label>
+                <span>Autonomy</span>
+                <select
+                  value={store.stomp.config.autonomy}
+                  onChange={e => void store.updateStompConfig({
+                    autonomy: e.target.value as typeof store.stomp.config.autonomy,
+                  })}
+                >
+                  <option value="off">Off</option>
+                  <option value="notes_only">Notes only</option>
+                  <option value="gentle">Gentle — notes + tidy allowed folders</option>
+                  <option value="helpful">Helpful — + daily log + staged missions</option>
+                  <option value="full">Full buddy (same as helpful; custom paths in Settings)</option>
+                </select>
+              </label>
+              <label className="stomp-toggle">
+                <input
+                  type="checkbox"
+                  checked={store.stomp.config.watchEnabled !== false}
+                  onChange={e => void store.updateStompConfig({ watchEnabled: e.target.checked })}
+                />
+                <span>Random folder check-ins (read-only)</span>
+              </label>
+            </div>
+
+            <div className="card stomp-how-card">
+              <h3 className="card-heading">How Dino works</h3>
+              <ul className="stomp-how-list">
+                <li><strong>Check-ins</strong> — read-only peeks at check-in folders (counts, filenames). Dino writes a note; nothing moves.</li>
+                <li><strong>Tidy</strong> — needs <strong>Gentle</strong> autonomy or higher. Scans tidy folders <em>and one level of subfolders</em> (e.g. Videos/Screen Recordings). Moves loose files into <code>DinoSorted/</code>; never deletes.</li>
+                <li><strong>When</strong> — idle moments, spacing caps, quiet hours (no file moves at night). Engage or tap Stomp now to act sooner.</li>
+              </ul>
+            </div>
+
+            <div className="card stomp-watch-card">
+              <h3 className="card-heading">Tidy folders</h3>
+              <p className="infra-desc">
+                Dino moves loose files into <code>DinoSorted/</code> subfolders (videos, images, documents…).
+                Needs <strong>Gentle</strong> autonomy or higher. One path per line.
+              </p>
+              <label>
+                <span>Tidy folders (empty = Downloads, Desktop, Documents, Videos + subfolders)</span>
+                <textarea
+                  className="stomp-paths-textarea"
+                  rows={4}
+                  value={(store.stomp.config.allowedPaths ?? []).join('\n')}
+                  onChange={e => void store.updateStompConfig({
+                    allowedPaths: parseStompPathLines(e.target.value),
+                  })}
+                  placeholder={'C:\\Users\\You\\Downloads\nC:\\Users\\You\\Videos\\Screen Recordings'}
+                />
+              </label>
+            </div>
+
+            <div className="card stomp-watch-card">
+              <h3 className="card-heading">Where Dino peeks</h3>
+              <p className="infra-desc">
+                Check-ins are <strong>read-only</strong> — filenames and counts only, no file contents, no whole-disk scan.
+                Default includes Documents, Pictures, Videos, Screen Recordings, Music, Downloads, Desktop.
+              </p>
+              <label>
+                <span>Check-in folders (one per line, empty = defaults)</span>
+                <textarea
+                  className="stomp-paths-textarea"
+                  rows={4}
+                  value={(store.stomp.config.watchPaths ?? []).join('\n')}
+                  onChange={e => void store.updateStompConfig({
+                    watchPaths: parseStompPathLines(e.target.value),
+                  })}
+                  placeholder="Documents, Pictures, Videos, Music"
+                />
+              </label>
+            </div>
+
+            <div className="card stomp-roadmap-card">
+              <h3 className="card-heading">Roadmap</h3>
+              <ul className="stomp-roadmap-list">
+                <li className="done">v0.1 — Warm notes + journal</li>
+                <li className="done">v0.2 — Gentle tidy (move only, undo)</li>
+                <li className="done">v0.3 — Daily log + staged missions</li>
+                <li className="done">v0.4 — Random folder check-ins</li>
+                <li>v0.5 — Pattern learning + Pantheon handoffs</li>
+              </ul>
+            </div>
+
+            {store.stomp.journal.length > 0 ? (
+              <div className="stomp-journal">
+                {store.stomp.journal.map(entry => (
+                  <article
+                    key={entry.id}
+                    className={`card stomp-entry ${entry.dismissedAt ? 'dismissed' : ''} ${entry.engagedAt ? 'engaged' : ''}`}
+                  >
+                    <header className="stomp-entry-head">
+                      <span className="stomp-entry-kind">{entry.kind}</span>
+                      <time>{new Date(entry.surfacedAt).toLocaleString()}</time>
+                    </header>
+                    <h3>{entry.title}</h3>
+                    <div className="stomp-entry-body">
+                      {entry.body.split('\n').map((line, i) => (
+                        <p key={i}>{line}</p>
+                      ))}
+                    </div>
+                    <footer className="stomp-entry-actions">
+                      {entry.kind === 'prepare' && entry.prepareGoal && (
+                        <button
+                          className="btn-ghost btn-sm"
+                          onClick={() => launchMission(entry.prepareGoal!)}
+                        >
+                          <Play size={12} /> Run mission
+                        </button>
+                      )}
+                      {entry.filePath && entry.kind === 'tidy' && (
+                        <button
+                          className="btn-ghost btn-sm"
+                          onClick={() => void store.openStompFolder(entry.filePath!)}
+                        >
+                          <FolderOpen size={12} /> Open folder
+                        </button>
+                      )}
+                      {entry.filePath && (entry.kind === 'document' || entry.kind === 'prepare' || entry.kind === 'note') && (
+                        <button
+                          className="btn-ghost btn-sm"
+                          onClick={() => void store.openStompNotesDirectory()}
+                        >
+                          <FolderOpen size={12} /> Open note
+                        </button>
+                      )}
+                      {entry.kind === 'tidy' && entry.undoManifest && entry.undoManifest.length > 0 && !entry.undoneAt && (
+                        <button className="btn-ghost btn-sm" onClick={() => void store.undoStomp(entry.id)}>
+                          Undo tidy
+                        </button>
+                      )}
+                      {entry.undoneAt && (
+                        <span className="stomp-undone-label">Undone ✓</span>
+                      )}
+                      {!entry.engagedAt && (
+                        <button className="btn-ghost btn-sm" onClick={() => void store.engageStomp(entry.id)}>
+                          <Heart size={12} /> Thanks, Dino
+                        </button>
+                      )}
+                      {!entry.dismissedAt && (
+                        <button className="btn-ghost btn-sm" onClick={() => void store.dismissStomp(entry.id)}>
+                          Not now
+                        </button>
+                      )}
+                    </footer>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="card">
+                <div className="empty">
+                  No stomps yet. Leave DinoClaw open — when the moment is right, you'll get a note. Or hit Stomp now!
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -1028,6 +1360,89 @@ function App() {
                         <code>desktop_scroll</code>. Also use <code>open_file_external</code> / <code>reveal_in_explorer</code> to
                         pull up workspace files. Still respects approval when policy requires it.
                       </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <h3 className="card-heading"><Heart size={14} /> Dino Stomp</h3>
+                  <p className="infra-desc">
+                    Proactive beneficial care — Dino writes warm notes when it helps.
+                    Quiet hours, daily caps, and dismiss cooldown keep it respectful.
+                  </p>
+                  <div className="field-stack">
+                    <label className="stomp-toggle">
+                      <input
+                        type="checkbox"
+                        checked={store.stomp.config.enabled}
+                        onChange={e => void store.updateStompConfig({ enabled: e.target.checked })}
+                      />
+                      <span>Enable autonomous notes</span>
+                    </label>
+                    <label>
+                      <span>Check-in interval (seconds)</span>
+                      <input
+                        type="number"
+                        min={60}
+                        value={store.stomp.config.tickSeconds}
+                        onChange={e => void store.updateStompConfig({
+                          tickSeconds: Math.max(60, Number(e.target.value) || 300),
+                        })}
+                      />
+                    </label>
+                    <label>
+                      <span>Daily note cap</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={24}
+                        value={store.stomp.config.dailyNoteCap}
+                        onChange={e => void store.updateStompConfig({
+                          dailyNoteCap: Math.max(1, Number(e.target.value) || 8),
+                        })}
+                      />
+                    </label>
+                    <label>
+                      <span>Daily action cap (tidy, log, prepare)</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={12}
+                        value={store.stomp.config.dailyActionCap}
+                        onChange={e => void store.updateStompConfig({
+                          dailyActionCap: Math.max(1, Number(e.target.value) || 3),
+                        })}
+                      />
+                    </label>
+                    <label>
+                      <span>Tidy folders (one path per line, empty = Downloads, Desktop, Documents, Videos + subfolders)</span>
+                      <textarea
+                        rows={3}
+                        value={(store.stomp.config.allowedPaths ?? []).join('\n')}
+                        onChange={e => void store.updateStompConfig({
+                          allowedPaths: parseStompPathLines(e.target.value),
+                        })}
+                        placeholder="Leave empty for defaults (includes Videos/Screen Recordings)"
+                      />
+                    </label>
+                    <label className="stomp-toggle">
+                      <input
+                        type="checkbox"
+                        checked={store.stomp.config.watchEnabled !== false}
+                        onChange={e => void store.updateStompConfig({ watchEnabled: e.target.checked })}
+                      />
+                      <span>Random folder check-ins (read-only peek)</span>
+                    </label>
+                    <label>
+                      <span>Check-in folders (one per line, empty = defaults incl. Screen Recordings)</span>
+                      <textarea
+                        rows={4}
+                        value={(store.stomp.config.watchPaths ?? []).join('\n')}
+                        onChange={e => void store.updateStompConfig({
+                          watchPaths: parseStompPathLines(e.target.value),
+                        })}
+                        placeholder="Add paths like D:\Projects or ~/Documents"
+                      />
                     </label>
                   </div>
                 </div>
