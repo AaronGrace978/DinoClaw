@@ -55,6 +55,28 @@ cd DinoClaw
 launch.bat
 ```
 
+### Linux / Steam Deck (easiest)
+Switch to **Desktop Mode** on Steam Deck, open Konsole, then:
+
+```
+curl -fsSL https://raw.githubusercontent.com/AaronGrace978/DinoClaw/main/install.sh | bash
+```
+
+That downloads the latest release AppImage, adds DinoClaw to your app menu, and installs the `dinoclaw` command. To add it to Steam: **Steam → Add a Non-Steam Game → DinoClaw**.
+
+**Build from source on Deck:**
+```
+git clone https://github.com/AaronGrace978/DinoClaw.git
+cd DinoClaw
+./build-linux.sh
+./install.sh --file release/DinoClaw-*-linux-*.AppImage --launch
+```
+
+**Dev mode (contributors):**
+```
+./launch.sh
+```
+
 ### Any Platform
 ```
 git clone https://github.com/AaronGrace978/DinoClaw.git
@@ -68,6 +90,11 @@ npm run dev
 npm run build
 npm run dist
 # Output: release/ folder with .exe, .dmg, or AppImage
+
+# Linux / Steam Deck AppImage only:
+npm run dist:linux
+# or
+./build-linux.sh
 ```
 
 ### CLI Mode (headless)
