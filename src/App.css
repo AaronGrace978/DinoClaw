@@ -1762,6 +1762,148 @@ select option:checked {
   padding: 6px 8px;
 }
 
+/* ── Voice / Talk Mode ─────────────────────────────── */
+.voice-panel {
+  position: relative;
+  z-index: 1;
+  margin: 0 auto 20px;
+  max-width: 720px;
+  padding: 18px 20px;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 230, 138, 0.18);
+  background: linear-gradient(145deg, rgba(0, 230, 138, 0.06), rgba(12, 17, 24, 0.92));
+}
+.voice-panel--active {
+  border-color: rgba(0, 230, 138, 0.42);
+  box-shadow: 0 0 24px rgba(0, 230, 138, 0.08);
+}
+.voice-panel--listening {
+  animation: voice-glow 2s ease-in-out infinite;
+}
+.voice-panel--unsupported {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  opacity: 0.75;
+}
+.voice-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.voice-panel-head h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--g);
+}
+.voice-panel-head p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--t2);
+}
+.voice-talk-toggle {
+  min-width: 56px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--t2);
+  font-weight: 600;
+  cursor: pointer;
+}
+.voice-talk-toggle.on {
+  border-color: rgba(0, 230, 138, 0.5);
+  background: rgba(0, 230, 138, 0.14);
+  color: var(--g);
+}
+.voice-panel-controls {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.voice-mic-btn {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 230, 138, 0.35);
+  background: rgba(0, 230, 138, 0.08);
+  color: var(--g);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.voice-mic-btn.listening {
+  border-color: var(--g);
+  background: rgba(0, 230, 138, 0.18);
+}
+.voice-mic-ring {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 230, 138, 0.25);
+  opacity: 0;
+}
+.voice-mic-btn.listening .voice-mic-ring {
+  opacity: 1;
+  animation: voice-ring 1.4s ease-out infinite;
+}
+.voice-panel-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 48px;
+}
+.voice-status-line {
+  font-size: 13px;
+  color: var(--t2);
+}
+.voice-status-line--live {
+  color: var(--g);
+  font-weight: 600;
+}
+.voice-interim {
+  font-size: 15px;
+  color: var(--t1);
+  font-style: italic;
+}
+.voice-error {
+  font-size: 12px;
+  color: #ff7b7b;
+}
+.voice-panel-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.voice-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--t2);
+  cursor: pointer;
+}
+.voice-option span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@keyframes voice-ring {
+  0% { transform: scale(0.92); opacity: 0.8; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+@keyframes voice-glow {
+  0%, 100% { box-shadow: 0 0 18px rgba(0, 230, 138, 0.06); }
+  50% { box-shadow: 0 0 28px rgba(0, 230, 138, 0.14); }
+}
+
 /* ── Responsive ────────────────────────────────────── */
 @media (max-width: 1000px) {
   .run-grid, .settings-grid, .dash-grid { grid-template-columns: 1fr; }

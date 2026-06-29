@@ -36,7 +36,9 @@ import type {
   TunnelProvider,
   StompConfig,
   StompSnapshot,
+  VoiceConfig,
 } from '../src/shared/contracts'
+import { DEFAULT_VOICE_CONFIG } from '../src/shared/contracts'
 import { buildSystemPrompt, deriveMood } from './creed'
 import { callModel } from './provider'
 import { createStorage, type PersistedState } from './storage'
@@ -207,6 +209,7 @@ export class DinoRuntime {
   private tunnel: TunnelManager | null = null
   private readonly serviceManager: ServiceManager
   private browserConfig: BrowserConfigType
+  private voiceConfig: VoiceConfig
   private channelConfig: ChannelConfig
 
   constructor() {
@@ -220,6 +223,10 @@ export class DinoRuntime {
     this.browserConfig = {
       ...DEFAULT_BROWSER_CONFIG,
       ...this.state.browser,
+    }
+    this.voiceConfig = {
+      ...DEFAULT_VOICE_CONFIG,
+      ...this.state.voice,
     }
     this.channelConfig = this.state.channelConfig ?? {
       telegram: { botToken: '', allowedUsers: [], enabled: false },
@@ -312,6 +319,7 @@ export class DinoRuntime {
       cronJobs: this.state.cronJobs,
       browser: this.browserConfig,
       browserSession: this.getBrowserSessionInfo(),
+      voice: this.voiceConfig,
       serviceStatus: this.serviceStatus,
       pluginActive: isPluginActive(),
       pluginStatus: getPlugin()?.getStatus?.() ?? null,
@@ -771,6 +779,13 @@ export class DinoRuntime {
     this.state.browser = { ...config }
     setBrowserConfig(config)
     this.persist()
+  }
+
+  updateVoiceConfig(config: Partial<VoiceConfig>): RuntimeSnapshot {
+    this.voiceConfig = { ...this.voiceConfig, ...config }
+    this.state.voice = { ...this.voiceConfig }
+    this.persist()
+    return this.getSnapshot()
   }
 
   async clearBrowserSession(): Promise<void> {

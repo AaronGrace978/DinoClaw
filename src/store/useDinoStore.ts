@@ -16,7 +16,9 @@ import type {
   StompConfig,
   StompUpdateEvent,
   TidyFolderPreview,
+  VoiceConfig,
 } from '../shared/contracts'
+import { DEFAULT_VOICE_CONFIG } from '../shared/contracts'
 
 interface DinoStore extends RuntimeSnapshot {
   isLoading: boolean
@@ -55,6 +57,7 @@ interface DinoStore extends RuntimeSnapshot {
   startTunnel: (provider: TunnelProvider, port: number, ngrokToken?: string) => Promise<string | null>
   stopTunnel: () => Promise<void>
   updateBrowser: (config: BrowserConfig) => Promise<void>
+  updateVoice: (config: Partial<VoiceConfig>) => Promise<void>
   clearBrowserSession: () => Promise<void>
   clearError: () => void
   updateStompConfig: (config: Partial<StompConfig>) => Promise<void>
@@ -100,6 +103,7 @@ const emptySnapshot: RuntimeSnapshot = {
   cronJobs: [],
   browser: { enabled: false, allowedDomains: [], requireApprovalForWrites: true },
   browserSession: { open: false, url: '', title: '', domain: '' },
+  voice: { ...DEFAULT_VOICE_CONFIG },
   serviceStatus: 'unknown',
   pluginActive: false,
   pluginStatus: null,
@@ -359,6 +363,11 @@ export const useDinoStore = create<DinoStore>((set) => ({
   updateBrowser: async (config) => {
     await window.dinoClaw.updateBrowser(config)
     const snapshot = await window.dinoClaw.getSnapshot()
+    set({ ...snapshot })
+  },
+
+  updateVoice: async (config) => {
+    const snapshot = await window.dinoClaw.updateVoice(config)
     set({ ...snapshot })
   },
 

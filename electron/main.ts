@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, Notification, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, Notification, nativeImage, session } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,6 +11,7 @@ import type {
   TunnelProvider,
   BrowserConfig,
   StompConfig,
+  VoiceConfig,
 } from '../src/shared/contracts'
 import { DinoRuntime } from './runtime'
 
@@ -105,6 +106,13 @@ function createTray(): void {
 }
 
 app.whenReady().then(async () => {
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === 'media')
+  })
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    return permission === 'media'
+  })
+
   // Core
   ipcMain.handle('dinoclaw:getSnapshot', () => runtime.getSnapshot())
   ipcMain.handle('dinoclaw:updateCreed', (_e, creed: DinoCreed) => runtime.updateCreed(creed))
@@ -174,6 +182,8 @@ app.whenReady().then(async () => {
   // Browser
   ipcMain.handle('dinoclaw:updateBrowser', (_e, config: BrowserConfig) =>
     runtime.updateBrowserConfig(config))
+  ipcMain.handle('dinoclaw:updateVoice', (_e, config: Partial<VoiceConfig>) =>
+    runtime.updateVoiceConfig(config))
   ipcMain.handle('dinoclaw:getBrowserSession', () => runtime.getBrowserSessionInfo())
   ipcMain.handle('dinoclaw:clearBrowserSession', () => runtime.clearBrowserSession())
 

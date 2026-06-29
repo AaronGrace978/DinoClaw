@@ -352,6 +352,32 @@ export interface BrowserConfig {
   requireApprovalForWrites: boolean
 }
 
+/* ─── Voice / Talk Mode ─────────────────────────────────── */
+
+export interface VoiceConfig {
+  /** Master voice feature toggle */
+  enabled: boolean
+  /** Listen via microphone (speech-to-text) */
+  inputEnabled: boolean
+  /** Speak DinoBuddy's replies aloud (text-to-speech) */
+  outputEnabled: boolean
+  /** Keep the mic open between missions (hands-free talk mode) */
+  continuous: boolean
+  /** Send the mission automatically when you finish speaking */
+  autoSubmit: boolean
+  /** Hold the mic button to talk instead of always-on listening */
+  pushToTalk: boolean
+}
+
+export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
+  enabled: true,
+  inputEnabled: true,
+  outputEnabled: true,
+  continuous: true,
+  autoSubmit: true,
+  pushToTalk: false,
+}
+
 export interface BrowserSessionInfo {
   open: boolean
   url: string
@@ -455,6 +481,7 @@ export interface RuntimeSnapshot {
   cronJobs: CronJobInfo[]
   browser: BrowserConfig
   browserSession: BrowserSessionInfo
+  voice: VoiceConfig
   serviceStatus: ServiceStatus
   pluginActive: boolean
   pluginStatus: Record<string, unknown> | null
@@ -544,6 +571,7 @@ export interface DinoClawApi {
   stopTunnel: () => Promise<void>
   updateDocker: (config: Partial<DockerStatus>) => Promise<void>
   updateBrowser: (config: BrowserConfig) => Promise<void>
+  updateVoice: (config: Partial<VoiceConfig>) => Promise<RuntimeSnapshot>
   getBrowserSession: () => Promise<BrowserSessionInfo>
   clearBrowserSession: () => Promise<void>
   getServiceStatus: () => Promise<ServiceStatus>

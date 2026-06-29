@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Flame,
   Zap,
@@ -31,6 +31,7 @@ import {
   Plus,
   Heart,
   Smartphone,
+  Mic,
 } from 'lucide-react'
 import type {
   DinoCreed,
@@ -46,6 +47,7 @@ import type {
 import { PROVIDER_DEFAULTS, OLLAMA_CLOUD_MODELS } from './shared/contracts'
 import { parseStompPathLines } from './shared/stomp-paths'
 import CreedPanel from './components/CreedPanel'
+import VoiceTalkPanel, { speakIfEnabled } from './components/VoiceTalkPanel'
 import WebPreviewBanner from './components/WebPreviewBanner'
 import { useDinoStore } from './store/useDinoStore'
 import './App.css'
@@ -87,6 +89,8 @@ function App() {
   const [browserDomainsInput, setBrowserDomainsInput] = useState('')
   const [tidyPreview, setTidyPreview] = useState<TidyFolderPreview[]>([])
   const [tidyPreviewLoading, setTidyPreviewLoading] = useState(false)
+  const [talkMode, setTalkMode] = useState(false)
+  const lastSpokenRef = useRef('')
 
   const refreshTidyPreview = useCallback(async () => {
     if (!window.dinoClaw?.previewTidyFolders) return
@@ -155,12 +159,30 @@ function App() {
     return store.memory.slice(0, 30)
   }, [store.memory, store.memorySearchResults])
 
-  const handleRun = async () => {
-    const t = goal.trim()
+  const handleRun = useCallback(async (overrideGoal?: string) => {
+    const t = (overrideGoal ?? goal).trim()
     if (!t) return
+    lastSpokenRef.current = ''
     const r = await store.runGoal({ goal: t })
-    if (r?.ok) setGoal('')
-  }
+    if (r?.ok) {
+      setGoal('')
+      if (r.run.finalMessage) speakIfEnabled(store.voice, r.run.finalMessage, lastSpokenRef)
+    }
+  }, [goal, store])
+
+  const handleVoiceSubmit = useCallback((transcript: string) => {
+    const t = transcript.trim()
+    if (!t) return
+    setGoal(t)
+    if (store.voice.autoSubmit) void handleRun(t)
+  }, [store.voice.autoSubmit, handleRun])
+
+  useEffect(() => {
+    const finals = store.liveSteps.filter(e => e.step.kind === 'final')
+    const last = finals[finals.length - 1]
+    if (!last?.step.summary) return
+    speakIfEnabled(store.voice, last.step.summary, lastSpokenRef)
+  }, [store.liveSteps, store.voice])
 
   const handleStop = async () => {
     await store.runGoal({ goal: 'stop' })
@@ -474,6 +496,15 @@ function App() {
               <Flame size={40} className="hero-icon" />
               <h1>Give DinoBuddy a mission</h1>
               <p>Plan, execute, observe, reflect. {store.tools.length} tools at the ready.</p>
+              <VoiceTalkPanel
+                config={store.voice}
+                talkMode={talkMode}
+                onTalkModeChange={setTalkMode}
+                onUpdateConfig={patch => void store.updateVoice(patch)}
+                onSubmitTranscript={handleVoiceSubmit}
+                disabled={!store.voice.enabled}
+                isRunning={store.isRunning}
+              />
               <div className="composer">
                 <textarea
                   rows={4}
@@ -1431,6 +1462,53 @@ function App() {
                         <code>desktop_scroll</code>. Also use <code>open_file_external</code> / <code>reveal_in_explorer</code> to
                         pull up workspace files. Still respects approval when policy requires it.
                       </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <h3 className="card-heading"><Mic size={14} /> Talk Mode</h3>
+                  <p className="infra-desc">
+                    Hands-free voice missions on the Mission tab. Uses your mic and speakers via the Web Speech API.
+                  </p>
+                  <div className="field-stack">
+                    <label className="stomp-toggle">
+                      <input
+                        type="checkbox"
+                        checked={store.voice.enabled}
+                        onChange={e => void store.updateVoice({ enabled: e.target.checked })}
+                      />
+                      <span>Enable voice / talk mode</span>
+                    </label>
+                    <label className="stomp-toggle">
+                      <input
+                        type="checkbox"
+                        checked={store.voice.inputEnabled}
+                        disabled={!store.voice.enabled}
+                        onChange={e => void store.updateVoice({ inputEnabled: e.target.checked })}
+                      />
+                      <span>Microphone input (speech-to-text)</span>
+                    </label>
+                    <label className="stomp-toggle">
+                      <input
+                        type="checkbox"
+                        checked={store.voice.outputEnabled}
+                        disabled={!store.voice.enabled}
+                        onChange={e => {
+                          if (!e.target.checked) window.speechSynthesis.cancel()
+                          void store.updateVoice({ outputEnabled: e.target.checked })
+                        }}
+                      />
+                      <span>Speak DinoBuddy&apos;s replies aloud</span>
+                    </label>
+                    <label className="stomp-toggle">
+                      <input
+                        type="checkbox"
+                        checked={store.voice.continuous}
+                        disabled={!store.voice.enabled}
+                        onChange={e => void store.updateVoice({ continuous: e.target.checked })}
+                      />
+                      <span>Keep listening between missions (hands-free)</span>
                     </label>
                   </div>
                 </div>
