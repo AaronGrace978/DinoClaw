@@ -1469,7 +1469,8 @@ function App() {
                 <div className="card">
                   <h3 className="card-heading"><Mic size={14} /> Talk Mode</h3>
                   <p className="infra-desc">
-                    Hands-free voice missions on the Mission tab. Uses your mic and speakers via the Web Speech API.
+                    Hands-free voice missions on the Mission tab. The desktop app records your mic locally and transcribes
+                    speech (Groq Whisper API key recommended — free tier works — or install local <code>whisper</code> CLI).
                   </p>
                   <div className="field-stack">
                     <label className="stomp-toggle">

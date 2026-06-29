@@ -40,6 +40,7 @@ import type {
 } from '../src/shared/contracts'
 import { DEFAULT_VOICE_CONFIG } from '../src/shared/contracts'
 import { buildSystemPrompt, deriveMood } from './creed'
+import { transcribeSpeech } from './voice-stt'
 import { callModel } from './provider'
 import { createStorage, type PersistedState } from './storage'
 import { DinoStomp } from './dino-stomp'
@@ -786,6 +787,10 @@ export class DinoRuntime {
     this.state.voice = { ...this.voiceConfig }
     this.persist()
     return this.getSnapshot()
+  }
+
+  async transcribeAudio(audio: Buffer, mimeType: string): Promise<string> {
+    return transcribeSpeech(audio, mimeType, this.state.model)
   }
 
   async clearBrowserSession(): Promise<void> {

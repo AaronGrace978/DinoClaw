@@ -33,6 +33,7 @@ const api: DinoClawApi = {
   updateDocker: (config) => ipcRenderer.invoke('dinoclaw:updateDocker', config),
   updateBrowser: (config) => ipcRenderer.invoke('dinoclaw:updateBrowser', config),
   updateVoice: (config) => ipcRenderer.invoke('dinoclaw:updateVoice', config),
+  transcribeAudio: (audio, mimeType) => ipcRenderer.invoke('dinoclaw:transcribeAudio', audio, mimeType),
   getBrowserSession: () => ipcRenderer.invoke('dinoclaw:getBrowserSession'),
   clearBrowserSession: () => ipcRenderer.invoke('dinoclaw:clearBrowserSession'),
   getServiceStatus: () => ipcRenderer.invoke('dinoclaw:getServiceStatus'),

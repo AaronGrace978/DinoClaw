@@ -81,7 +81,7 @@ export default function VoiceTalkPanel({
         <button
           type="button"
           className={`voice-mic-btn ${voice.listening ? 'listening' : ''}`}
-          disabled={!config.enabled || !config.inputEnabled || (disabled && !config.pushToTalk)}
+          disabled={!config.enabled || !config.inputEnabled || (disabled && !config.pushToTalk) || voice.transcribing}
           aria-pressed={voice.listening}
           onClick={() => {
             if (config.pushToTalk) return
@@ -98,8 +98,11 @@ export default function VoiceTalkPanel({
 
         <div className="voice-panel-status">
           {!config.enabled && <span className="voice-status-line">Voice is off in Settings.</span>}
-          {config.enabled && talkMode && voice.listening && (
+          {config.enabled && talkMode && voice.listening && !voice.transcribing && (
             <span className="voice-status-line voice-status-line--live">Listening… speak your mission</span>
+          )}
+          {voice.transcribing && (
+            <span className="voice-status-line voice-status-line--live">Transcribing your speech…</span>
           )}
           {config.enabled && talkMode && !voice.listening && !isRunning && (
             <span className="voice-status-line">Talk mode on — waiting for mic</span>

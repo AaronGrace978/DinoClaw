@@ -89,6 +89,7 @@ export function installWebMock(): void {
       snapshot = { ...snapshot, voice: { ...snapshot.voice, ...config } }
       return cloneSnapshot(snapshot)
     },
+    transcribeAudio: async () => 'Web preview — install the desktop app for Talk Mode.',
     getBrowserSession: async () => snapshot.browserSession,
     clearBrowserSession: async () => {},
     getServiceStatus: async () => 'not_installed',
