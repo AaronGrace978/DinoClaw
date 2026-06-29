@@ -16,7 +16,9 @@ import type {
   AuditEntry,
   StompConfig,
   StompJournalEntry,
+  VoiceConfig,
 } from '../src/shared/contracts'
+import { DEFAULT_VOICE_CONFIG } from '../src/shared/contracts'
 import {
   DEFAULT_STOMP_CONFIG,
   DEFAULT_STOMP_RUNTIME,
@@ -38,6 +40,7 @@ export interface PersistedState {
   skills: Skill[]
   auditLog: AuditEntry[]
   browser: BrowserConfig
+  voice: VoiceConfig
   runQueue: RunQueueItem[]
   activeRunId: string | null
   pendingApprovals: ApprovalRequest[]
@@ -74,6 +77,7 @@ const DEFAULT_STATE: PersistedState = {
   skills: getBuiltInSkillPacks(),
   auditLog: [],
   browser: { ...DEFAULT_BROWSER_CONFIG, requireApprovalForWrites: true },
+  voice: { ...DEFAULT_VOICE_CONFIG },
   runQueue: [],
   activeRunId: null,
   pendingApprovals: [],
@@ -115,6 +119,7 @@ export function createStorage(dataDir: string) {
         skills:   parsed.skills   ?? structuredClone(DEFAULT_STATE.skills),
         auditLog: parsed.auditLog ?? [],
         browser:  parsed.browser  ?? structuredClone(DEFAULT_STATE.browser),
+        voice:    parsed.voice    ?? structuredClone(DEFAULT_STATE.voice),
         runQueue: parsed.runQueue ?? [],
         activeRunId: parsed.activeRunId ?? null,
         pendingApprovals: parsed.pendingApprovals ?? [],
@@ -188,6 +193,14 @@ function migrate(state: PersistedState): PersistedState {
   if (!state.browser.allowedDomains) state.browser.allowedDomains = []
   if (typeof state.browser.enabled !== 'boolean') state.browser.enabled = false
   if (typeof state.browser.requireApprovalForWrites !== 'boolean') state.browser.requireApprovalForWrites = true
+
+  if (!state.voice) state.voice = structuredClone(DEFAULT_STATE.voice)
+  if (typeof state.voice.enabled !== 'boolean') state.voice.enabled = DEFAULT_VOICE_CONFIG.enabled
+  if (typeof state.voice.inputEnabled !== 'boolean') state.voice.inputEnabled = DEFAULT_VOICE_CONFIG.inputEnabled
+  if (typeof state.voice.outputEnabled !== 'boolean') state.voice.outputEnabled = DEFAULT_VOICE_CONFIG.outputEnabled
+  if (typeof state.voice.continuous !== 'boolean') state.voice.continuous = DEFAULT_VOICE_CONFIG.continuous
+  if (typeof state.voice.autoSubmit !== 'boolean') state.voice.autoSubmit = DEFAULT_VOICE_CONFIG.autoSubmit
+  if (typeof state.voice.pushToTalk !== 'boolean') state.voice.pushToTalk = DEFAULT_VOICE_CONFIG.pushToTalk
 
   if (!Array.isArray(state.runQueue)) state.runQueue = []
   for (const item of state.runQueue) {

@@ -32,6 +32,7 @@ const api: DinoClawApi = {
   stopTunnel: () => ipcRenderer.invoke('dinoclaw:stopTunnel'),
   updateDocker: (config) => ipcRenderer.invoke('dinoclaw:updateDocker', config),
   updateBrowser: (config) => ipcRenderer.invoke('dinoclaw:updateBrowser', config),
+  updateVoice: (config) => ipcRenderer.invoke('dinoclaw:updateVoice', config),
   getBrowserSession: () => ipcRenderer.invoke('dinoclaw:getBrowserSession'),
   clearBrowserSession: () => ipcRenderer.invoke('dinoclaw:clearBrowserSession'),
   getServiceStatus: () => ipcRenderer.invoke('dinoclaw:getServiceStatus'),

@@ -85,6 +85,10 @@ export function installWebMock(): void {
     stopTunnel: async () => {},
     updateDocker: async () => {},
     updateBrowser: async () => {},
+    updateVoice: async (config) => {
+      snapshot = { ...snapshot, voice: { ...snapshot.voice, ...config } }
+      return cloneSnapshot(snapshot)
+    },
     getBrowserSession: async () => snapshot.browserSession,
     clearBrowserSession: async () => {},
     getServiceStatus: async () => 'not_installed',

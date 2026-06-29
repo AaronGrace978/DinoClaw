@@ -96,6 +96,7 @@ export function createDemoSnapshot(): RuntimeSnapshot {
     cronJobs: [],
     browser: { enabled: false, allowedDomains: [], requireApprovalForWrites: true },
     browserSession: { open: false, url: '', title: '', domain: '' },
+    voice: { enabled: false, inputEnabled: false, outputEnabled: false, continuous: true, autoSubmit: true, pushToTalk: false },
     serviceStatus: 'not_installed',
     pluginActive: false,
     pluginStatus: null,
