@@ -97,6 +97,77 @@ need_cmd() {
   fi
 }
 
+check_install_ready() {
+  local need_bytes=140000000
+  local avail_bytes
+
+  mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR" || {
+    err "Could not create install directories under \$HOME."
+    exit 1
+  }
+
+  if [[ ! -w "$INSTALL_DIR" ]]; then
+    err "Install directory is not writable: $INSTALL_DIR"
+    exit 1
+  fi
+
+  avail_bytes="$(df -k "$INSTALL_DIR" 2>/dev/null | awk 'NR==2 {print $4 * 1024}' || echo 0)"
+  if [[ "$avail_bytes" =~ ^[0-9]+$ ]] && (( avail_bytes > 0 && avail_bytes < need_bytes )); then
+    err "Not enough free disk space in $(df -h "$INSTALL_DIR" | awk 'NR==2 {print $6}')."
+    err "Need ~135 MB free; AppImage is ~124 MB. Free space on Steam Deck: Settings → Storage."
+    exit 1
+  fi
+
+  if command -v pgrep >/dev/null 2>&1; then
+    if pgrep -f "$INSTALL_DIR/$APPIMAGE_NAME" >/dev/null 2>&1 \
+      || pgrep -f '[D]inoClaw.*AppImage' >/dev/null 2>&1 \
+      || pgrep -x DinoClaw >/dev/null 2>&1; then
+      warn "DinoClaw appears to be running. Close it before updating."
+      warn "Trying to stop running instance..."
+      pkill -f "$INSTALL_DIR/$APPIMAGE_NAME" 2>/dev/null || true
+      pkill -x DinoClaw 2>/dev/null || true
+      sleep 1
+      if pgrep -f "$INSTALL_DIR/$APPIMAGE_NAME" >/dev/null 2>&1; then
+        err "Could not replace AppImage while DinoClaw is running."
+        err "Quit DinoClaw from the app menu or run: pkill -x DinoClaw"
+        exit 1
+      fi
+    fi
+  fi
+}
+
+download_to_file() {
+  local url="$1"
+  local dest="$2"
+  local tmp="${dest}.part.$$"
+  local attempt
+
+  rm -f "$tmp"
+
+  for attempt in 1 2 3; do
+    if curl -fsSL --retry 2 --retry-delay 2 --connect-timeout 30 --max-time 900 \
+      "$url" -o "$tmp"; then
+      if [[ -s "$tmp" ]]; then
+        mv -f "$tmp" "$dest"
+        return 0
+      fi
+      rm -f "$tmp"
+      err "Download was empty."
+      return 1
+    fi
+    warn "Download attempt $attempt failed; retrying..."
+    sleep 2
+  done
+
+  rm -f "$tmp"
+  err "Download failed after 3 attempts."
+  err "Common fixes on Steam Deck:"
+  err "  • Quit DinoClaw if it is open"
+  err "  • Free ~200 MB on your home drive (Settings → Storage)"
+  err "  • Retry on Wi‑Fi, or download manually from GitHub Releases"
+  return 1
+}
+
 uninstall() {
   log "Removing DinoClaw..."
   rm -f "$DESKTOP_DIR/$DESKTOP_ID"
@@ -201,8 +272,8 @@ download_release() {
   fi
 
   log "Downloading $asset_url"
-  mkdir -p "$INSTALL_DIR"
-  curl -fsSL "$asset_url" -o "$INSTALL_DIR/$APPIMAGE_NAME"
+  check_install_ready
+  download_to_file "$asset_url" "$INSTALL_DIR/$APPIMAGE_NAME"
 }
 
 install_appimage() {
@@ -211,6 +282,7 @@ install_appimage() {
     err "AppImage not found: $src"
     exit 1
   fi
+  check_install_ready
   mkdir -p "$INSTALL_DIR"
   cp -f "$src" "$INSTALL_DIR/$APPIMAGE_NAME"
 }
