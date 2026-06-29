@@ -572,6 +572,7 @@ export interface DinoClawApi {
   updateDocker: (config: Partial<DockerStatus>) => Promise<void>
   updateBrowser: (config: BrowserConfig) => Promise<void>
   updateVoice: (config: Partial<VoiceConfig>) => Promise<RuntimeSnapshot>
+  transcribeAudio: (audio: ArrayBuffer, mimeType: string) => Promise<string>
   getBrowserSession: () => Promise<BrowserSessionInfo>
   clearBrowserSession: () => Promise<void>
   getServiceStatus: () => Promise<ServiceStatus>

@@ -184,6 +184,8 @@ app.whenReady().then(async () => {
     runtime.updateBrowserConfig(config))
   ipcMain.handle('dinoclaw:updateVoice', (_e, config: Partial<VoiceConfig>) =>
     runtime.updateVoiceConfig(config))
+  ipcMain.handle('dinoclaw:transcribeAudio', (_e, audio: ArrayBuffer, mimeType: string) =>
+    runtime.transcribeAudio(Buffer.from(audio), mimeType))
   ipcMain.handle('dinoclaw:getBrowserSession', () => runtime.getBrowserSessionInfo())
   ipcMain.handle('dinoclaw:clearBrowserSession', () => runtime.clearBrowserSession())
 
