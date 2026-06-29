@@ -133,42 +133,71 @@ need_cmd curl
 need_cmd chmod
 need_cmd mkdir
 
-download_release() {
-  local api_url asset_url tmp
-  if [[ -n "$VERSION" ]]; then
-    api_url="https://api.github.com/repos/$REPO/releases/tags/$VERSION"
-  else
-    api_url="https://api.github.com/repos/$REPO/releases/latest"
-  fi
-
-  log "Fetching release info from GitHub..."
-  tmp="$(mktemp)"
-  if ! curl -fsSL "$api_url" -o "$tmp"; then
-    rm -f "$tmp"
-    err "Could not fetch release metadata. Tag may not exist yet."
-    err "Build locally with ./build-linux.sh then: ./install.sh --file release/*.AppImage"
-    exit 1
-  fi
-
-  # Prefer arch-specific AppImage, fall back to any AppImage asset.
+pick_appimage_url() {
+  local json_file="$1"
+  local asset_url
   asset_url="$(
-    grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+\.AppImage"' "$tmp" \
+    grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+\.AppImage"' "$json_file" \
       | sed -E 's/.*"([^"]+\.AppImage)".*/\1/' \
       | grep -E "linux-(x64|x86_64|${EB_ARCH})\.AppImage$" \
       | head -1 || true
   )"
   if [[ -z "$asset_url" ]]; then
     asset_url="$(
-      grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+\.AppImage"' "$tmp" \
+      grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+\.AppImage"' "$json_file" \
         | sed -E 's/.*"([^"]+\.AppImage)".*/\1/' \
         | head -1 || true
     )"
   fi
-  rm -f "$tmp"
+  printf '%s' "$asset_url"
+}
 
-  if [[ -z "$asset_url" ]]; then
-    err "No AppImage found in release. Try --file with a local build."
+download_release() {
+  local asset_url tmp tag_name
+
+  if [[ -n "$VERSION" ]]; then
+    log "Fetching release $VERSION from GitHub..."
+    tmp="$(mktemp)"
+    if ! curl -fsSL "https://api.github.com/repos/$REPO/releases/tags/$VERSION" -o "$tmp"; then
+      rm -f "$tmp"
+      err "Could not fetch release $VERSION."
+      exit 1
+    fi
+    asset_url="$(pick_appimage_url "$tmp")"
+    tag_name="$VERSION"
+    rm -f "$tmp"
+  else
+    log "Fetching release info from GitHub..."
+    tmp="$(mktemp)"
+    if ! curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=20" -o "$tmp"; then
+      rm -f "$tmp"
+      err "Could not reach GitHub Releases."
+      exit 1
+    fi
+    asset_url="$(pick_appimage_url "$tmp")"
+    tag_name="$(
+      grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' "$tmp" \
+        | head -1 \
+        | sed -E 's/.*"([^"]+)"/\1/' || true
+    )"
+    rm -f "$tmp"
+  fi
+
+  if [[ -z "${asset_url:-}" ]]; then
+    err "No Linux AppImage found in GitHub Releases yet."
+    echo
+    echo "  The latest release may be Windows-only. Either:"
+    echo "    1) Wait for v0.4.0+ (includes Steam Deck AppImage), then re-run this installer"
+    echo "    2) Build on Deck:"
+    echo "         git clone https://github.com/$REPO.git"
+    echo "         cd DinoClaw && ./build-linux.sh"
+    echo "         ./install.sh --file release/DinoClaw-*-linux-*.AppImage --launch"
+    echo
     exit 1
+  fi
+
+  if [[ -n "$tag_name" ]]; then
+    log "Using AppImage from release $tag_name"
   fi
 
   log "Downloading $asset_url"
