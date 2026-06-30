@@ -18,20 +18,34 @@ async function commandExists(name: string): Promise<boolean> {
   }
 }
 
+function espeakBundleRoot(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'espeak-ng')
+  return path.join(app.getAppPath(), 'build', 'espeak-ng')
+}
+
 function bundledEspeakBin(): string | null {
-  if (!app.isPackaged) return null
-  const bin = path.join(process.resourcesPath, 'espeak-ng', 'bin', 'espeak-ng')
+  const bin = path.join(espeakBundleRoot(), 'bin', 'espeak-ng')
   return fs.existsSync(bin) ? bin : null
 }
 
 function bundledEspeakEnv(): NodeJS.ProcessEnv {
-  const libDir = path.join(process.resourcesPath, 'espeak-ng', 'lib')
-  if (!fs.existsSync(libDir)) return { ...process.env }
+  const root = espeakBundleRoot()
+  const libDir = path.join(root, 'lib')
+  const dataDir = path.join(root, 'share', 'espeak-ng-data')
   const prev = process.env.LD_LIBRARY_PATH ?? ''
-  return {
+  const env = {
     ...process.env,
-    LD_LIBRARY_PATH: prev ? `${libDir}:${prev}` : libDir,
+    ...(fs.existsSync(libDir) ? { LD_LIBRARY_PATH: prev ? `${libDir}:${prev}` : libDir } : {}),
+    ...(fs.existsSync(dataDir) ? { ESPEAK_DATA_PATH: dataDir } : {}),
   }
+  return env
+}
+
+function bundledEspeakArgs(text: string): string[] {
+  const dataRoot = path.join(espeakBundleRoot(), 'share')
+  const dataDir = path.join(dataRoot, 'espeak-ng-data')
+  const args = ['-s', '165', '-v', 'en-us', text]
+  return fs.existsSync(dataDir) ? [`--path=${dataRoot}`, ...args] : args
 }
 
 function stopActiveSpeak(): void {
@@ -60,7 +74,7 @@ async function speakLinux(text: string): Promise<void> {
   // Built into the AppImage — no SteamOS pacman / read-only root needed.
   const bundled = bundledEspeakBin()
   if (bundled) {
-    await spawnSpeak(bundled, args, bundledEspeakEnv())
+    await spawnSpeak(bundled, bundledEspeakArgs(text), bundledEspeakEnv())
     return
   }
 

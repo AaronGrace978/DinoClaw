@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/build/espeak-ng"
 BIN_OUT="$OUT/bin"
 LIB_OUT="$OUT/lib"
+DATA_OUT="$OUT/share/espeak-ng-data"
 MARKER="$BIN_OUT/espeak-ng"
 
 if [[ -f "$MARKER" ]]; then
@@ -37,5 +38,31 @@ while IFS= read -r lib; do
   [[ -n "$lib" && -f "$lib" ]] || continue
   cp -Lf "$lib" "$LIB_OUT/" 2>/dev/null || cp -f "$lib" "$LIB_OUT/" 2>/dev/null || true
 done < <(ldd "$ESPEAK_BIN" | awk '/=> \// {print $3}')
+
+DATA_SRC=""
+for candidate in \
+  "/usr/share/espeak-ng-data" \
+  "/usr/lib/$(uname -m)-linux-gnu/espeak-ng-data" \
+  "/usr/lib/x86_64-linux-gnu/espeak-ng-data" \
+  "/usr/lib/aarch64-linux-gnu/espeak-ng-data"; do
+  if [[ -d "$candidate" ]]; then
+    DATA_SRC="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$DATA_SRC" ]] && command -v dpkg >/dev/null 2>&1; then
+  DATA_SRC="$(dpkg -L espeak-ng-data 2>/dev/null | grep -E '/espeak-ng-data$' | head -n 1 || true)"
+fi
+
+if [[ -z "$DATA_SRC" || ! -d "$DATA_SRC" ]]; then
+  echo "[espeak] ERROR: could not find espeak-ng-data directory."
+  exit 1
+fi
+
+echo "[espeak] Copying voice data from $DATA_SRC"
+rm -rf "$DATA_OUT"
+mkdir -p "$(dirname "$DATA_OUT")"
+cp -a "$DATA_SRC" "$DATA_OUT"
 
 echo "[espeak] Bundle complete: $OUT"
