@@ -105,6 +105,11 @@
       "description": "DinoClaw is a free desktop AI agent that runs on your machine. Missions, memory, skills, Telegram/Discord, and more.",
       "extraResources": [
         {
+          "from": "build/whisper-models",
+          "to": "whisper-models",
+          "filter": ["**/*"]
+        },
+        {
           "from": "build/espeak-ng",
           "to": "espeak-ng",
           "filter": ["**/*"]

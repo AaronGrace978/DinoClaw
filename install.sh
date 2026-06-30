@@ -98,7 +98,7 @@ need_cmd() {
 }
 
 check_install_ready() {
-  local need_bytes=140000000
+  local need_bytes=750000000
   local avail_bytes
 
   mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR" || {
@@ -114,7 +114,8 @@ check_install_ready() {
   avail_bytes="$(df -k "$INSTALL_DIR" 2>/dev/null | awk 'NR==2 {print $4 * 1024}' || echo 0)"
   if [[ "$avail_bytes" =~ ^[0-9]+$ ]] && (( avail_bytes > 0 && avail_bytes < need_bytes )); then
     err "Not enough free disk space in $(df -h "$INSTALL_DIR" | awk 'NR==2 {print $6}')."
-    err "Need ~135 MB free; AppImage is ~124 MB. Free space on Steam Deck: Settings → Storage."
+    err "Need ~750 MB free for the voice-enabled AppImage and update staging."
+    err "Free space on Steam Deck: Settings → Storage."
     exit 1
   fi
 
@@ -163,7 +164,7 @@ download_to_file() {
   err "Download failed after 3 attempts."
   err "Common fixes on Steam Deck:"
   err "  • Quit DinoClaw if it is open"
-  err "  • Free ~200 MB on your home drive (Settings → Storage)"
+  err "  • Free ~750 MB on your home drive (Settings → Storage)"
   err "  • Retry on Wi‑Fi, or download manually from GitHub Releases"
   return 1
 }
@@ -354,13 +355,16 @@ log "Or find DinoClaw in your app menu (Desktop Mode on Steam Deck)."
 
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   warn "~/.local/bin is not in your PATH."
-  warn "Launch directly: $INSTALL_DIR/$APPIMAGE_NAME"
+  warn "Launch with the generated Steam Deck-safe wrapper: $BIN_DIR/$LAUNCHER_NAME"
   warn "Or add to ~/.bashrc:  export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
 echo
 echo "  Launch now:"
-echo "    $INSTALL_DIR/$APPIMAGE_NAME"
+echo "    $BIN_DIR/$LAUNCHER_NAME"
+echo
+echo "  If you must run the AppImage directly:"
+echo "    APPIMAGE_EXTRACT_AND_RUN=1 $INSTALL_DIR/$APPIMAGE_NAME --no-sandbox"
 echo
 echo "  Voice on Steam Deck (v0.5.7+):"
 echo "    • Mic + spoken replies are built in — no pacman / no Wi‑Fi needed"
