@@ -1,7 +1,7 @@
 {
   "name": "dinoclaw",
   "private": true,
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "AI for the people. Desktop AI agent by BostonAi.io",
   "author": "BostonAi.io <hello@bostonai.io>",
   "homepage": "https://bostonai.io",
@@ -21,6 +21,7 @@
     "dist:linux": "npm run icons && npm run build && electron-builder --linux",
     "dist:appimage": "npm run dist:linux",
     "icons": "node scripts/generate-icons.mjs",
+    "bundle:whisper": "node scripts/bundle-whisper-model.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b",
@@ -73,6 +74,13 @@
     "asarUnpack": [
       "node_modules/@huggingface/transformers/**/*",
       "node_modules/onnxruntime-node/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "build/whisper-models",
+        "to": "whisper-models",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "target": [

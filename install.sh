@@ -346,6 +346,9 @@ write_launcher
 write_desktop_entry
 
 log "Installed to $INSTALL_DIR/$APPIMAGE_NAME"
+if [[ -n "${tag_name:-}" ]]; then
+  log "Release version: $tag_name"
+fi
 log "Run from terminal: $LAUNCHER_NAME"
 log "Or find DinoClaw in your app menu (Desktop Mode on Steam Deck)."
 

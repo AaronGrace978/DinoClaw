@@ -154,8 +154,7 @@ export async function transcribePcm(
   }
 
   throw new Error(
-    'Could not transcribe your voice. First use downloads a small speech model (~40 MB, one-time). '
-    + 'Check your internet connection, then try again. '
+    'Could not understand your voice. Tap the mic, speak, tap again. '
     + (errors.length ? `Details: ${errors.slice(0, 2).join(' | ')}` : ''),
   )
 }
@@ -202,8 +201,7 @@ export async function transcribeSpeech(
   }
 
   throw new Error(
-    'Could not transcribe speech. Tap the mic, speak, tap again. '
-    + 'Built-in speech recognition needs internet once to download its model. '
+    'Could not understand your voice. Tap the mic, speak, tap again. '
     + (errors.length ? `Details: ${errors.join(' | ')}` : ''),
   )
 }

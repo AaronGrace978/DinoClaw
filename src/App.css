@@ -1874,6 +1874,11 @@ select option:checked {
   font-size: 12px;
   color: #ff7b7b;
 }
+.voice-version-tag {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  opacity: 0.55;
+}
 .voice-help-cmd {
   margin-top: 8px;
   font-family: var(--mono);

@@ -186,8 +186,12 @@ app.whenReady().then(async () => {
     runtime.updateVoiceConfig(config))
   ipcMain.handle('dinoclaw:transcribeAudio', (_e, audio: ArrayBuffer, mimeType: string) =>
     runtime.transcribeAudio(Buffer.from(audio), mimeType))
-  ipcMain.handle('dinoclaw:transcribePcm', (_e, samples: Float32Array, sampleRate: number) =>
-    runtime.transcribePcm(samples, sampleRate))
+  ipcMain.handle('dinoclaw:transcribePcm', (_e, audio: ArrayBuffer, sampleRate: number) => {
+    const samples = audio instanceof ArrayBuffer
+      ? new Float32Array(audio)
+      : new Float32Array(audio as ArrayBuffer)
+    return runtime.transcribePcm(samples, sampleRate)
+  })
   ipcMain.handle('dinoclaw:speakText', (_e, text: string) => runtime.speakText(text))
   ipcMain.handle('dinoclaw:stopSpeech', () => { runtime.stopSpeech() })
   ipcMain.handle('dinoclaw:prepareVoice', () => runtime.prepareVoice())

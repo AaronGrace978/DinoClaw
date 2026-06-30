@@ -582,7 +582,7 @@ export interface DinoClawApi {
   updateBrowser: (config: BrowserConfig) => Promise<void>
   updateVoice: (config: Partial<VoiceConfig>) => Promise<RuntimeSnapshot>
   transcribeAudio: (audio: ArrayBuffer, mimeType: string) => Promise<string>
-  transcribePcm: (samples: Float32Array, sampleRate: number) => Promise<string>
+  transcribePcm: (audio: ArrayBuffer, sampleRate: number) => Promise<string>
   speakText: (text: string) => Promise<void>
   stopSpeech: () => Promise<void>
   prepareVoice: () => Promise<VoicePrepareProgress>

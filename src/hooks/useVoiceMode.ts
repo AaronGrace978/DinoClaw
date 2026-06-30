@@ -5,6 +5,28 @@ import { speakIfEnabled, stopSpeech } from '../lib/voice-speak'
 const SAMPLE_RATE = 16_000
 const MIN_SAMPLES = SAMPLE_RATE * 0.35 // ~350ms minimum speech
 
+function resampleTo16k(samples: Float32Array, fromRate: number): Float32Array {
+  if (fromRate === SAMPLE_RATE) return samples
+  const ratio = fromRate / SAMPLE_RATE
+  const newLength = Math.max(1, Math.floor(samples.length / ratio))
+  const out = new Float32Array(newLength)
+  for (let i = 0; i < newLength; i += 1) {
+    const srcIdx = i * ratio
+    const idx = Math.floor(srcIdx)
+    const frac = srcIdx - idx
+    const a = samples[idx] ?? 0
+    const b = samples[idx + 1] ?? a
+    out[i] = a + (b - a) * frac
+  }
+  return out
+}
+
+function coerceFloat32Array(samples: Float32Array | ArrayBuffer | number[]): Float32Array {
+  if (samples instanceof Float32Array) return samples
+  if (samples instanceof ArrayBuffer) return new Float32Array(samples)
+  return new Float32Array(samples)
+}
+
 function isDesktopApp(): boolean {
   return typeof window.dinoClaw?.getSnapshot === 'function'
 }
@@ -33,10 +55,12 @@ export interface UseVoiceModeResult {
 }
 
 async function transcribeSamples(samples: Float32Array): Promise<string> {
+  const pcm = coerceFloat32Array(samples)
   if (typeof window.dinoClaw.transcribePcm === 'function') {
-    return window.dinoClaw.transcribePcm(samples, SAMPLE_RATE)
+    const buf = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer
+    return window.dinoClaw.transcribePcm(buf, SAMPLE_RATE)
   }
-  const wav = encodeWav(samples, SAMPLE_RATE)
+  const wav = encodeWav(pcm, SAMPLE_RATE)
   return window.dinoClaw.transcribeAudio(wav.buffer.slice(0) as ArrayBuffer, 'audio/wav')
 }
 
@@ -83,6 +107,7 @@ export function useVoiceMode({
   const onFinalRef = useRef(onFinalTranscript)
   const streamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const captureRateRef = useRef(SAMPLE_RATE)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
   const samplesRef = useRef<number[]>([])
   const recordingRef = useRef(false)
@@ -109,14 +134,19 @@ export function useVoiceMode({
 
     const raw = samplesRef.current
     samplesRef.current = []
-    if (raw.length < MIN_SAMPLES) {
+    const minRawSamples = Math.ceil(MIN_SAMPLES * (captureRateRef.current / SAMPLE_RATE))
+    if (raw.length < minRawSamples) {
       setError('Didn\'t catch that — tap the mic, speak, then tap again.')
       return
     }
 
-    const pcm = new Float32Array(raw)
+    const pcm = resampleTo16k(new Float32Array(raw), captureRateRef.current)
+    if (pcm.length < MIN_SAMPLES) {
+      setError('Didn\'t catch that — tap the mic, speak, then tap again.')
+      return
+    }
+
     setTranscribing(true)
-    setError(null)
     try {
       const text = (await transcribeSamples(pcm)).trim()
       if (text) onFinalRef.current(text)
@@ -131,7 +161,6 @@ export function useVoiceMode({
   const startRecording = useCallback(async () => {
     if (!supported || !config.enabled || !config.inputEnabled || disabled || transcribing) return
 
-    setError(null)
     samplesRef.current = []
 
     try {
@@ -142,8 +171,9 @@ export function useVoiceMode({
         streamRef.current = stream
       }
 
-      const audioContext = audioContextRef.current ?? new AudioContext({ sampleRate: SAMPLE_RATE })
+      const audioContext = audioContextRef.current ?? new AudioContext()
       audioContextRef.current = audioContext
+      captureRateRef.current = audioContext.sampleRate
       if (audioContext.state === 'suspended') await audioContext.resume()
 
       const source = audioContext.createMediaStreamSource(streamRef.current)

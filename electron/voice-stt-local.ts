@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
 
@@ -22,8 +23,19 @@ let pipelinePromise: Promise<WhisperPipeline> | null = null
 let loadError: string | null = null
 let onProgress: ((progress: VoicePrepareProgress) => void) | null = null
 
+function bundledModelDir(): string | null {
+  if (!app.isPackaged) return null
+  const bundled = path.join(process.resourcesPath, 'whisper-models')
+  const modelOnnx = path.join(bundled, 'Xenova', 'whisper-tiny.en', 'onnx', 'model_quantized.onnx')
+  return fs.existsSync(modelOnnx) ? bundled : null
+}
+
 function modelCacheDir(): string {
-  return path.join(app.getPath('userData'), 'whisper-models')
+  return bundledModelDir() ?? path.join(app.getPath('userData'), 'whisper-models')
+}
+
+function modelIsBundled(): boolean {
+  return bundledModelDir() !== null
 }
 
 function report(progress: VoicePrepareProgress): void {
@@ -40,33 +52,44 @@ export function isWhisperModelReady(): boolean {
   return pipelinePromise !== null && loadError === null
 }
 
+export function resetWhisperPipeline(): void {
+  pipelinePromise = null
+  loadError = null
+}
+
 export async function prepareWhisperModel(): Promise<void> {
   await getWhisperPipeline()
 }
 
 async function getWhisperPipeline(): Promise<WhisperPipeline> {
-  if (loadError) throw new Error(loadError)
+  if (loadError) {
+    // Let the operator retry after a failed download without restarting the app.
+    resetWhisperPipeline()
+  }
   if (pipelinePromise) return pipelinePromise
 
   pipelinePromise = (async () => {
+    const offline = modelIsBundled()
     report({
       phase: 'starting',
-      message: 'Starting speech engine…',
+      message: offline
+        ? 'Loading built-in speech model…'
+        : 'Starting speech engine…',
     })
 
     try {
       const { env, pipeline } = await import('@huggingface/transformers')
-      env.cacheDir = modelCacheDir()
+      const cacheDir = modelCacheDir()
+      env.cacheDir = cacheDir
       env.allowLocalModels = true
-      env.allowRemoteModels = true
+      env.allowRemoteModels = !offline
 
       const progressCallback = (info: {
         status: string
         file?: string
         progress?: number
-        loaded?: number
-        total?: number
       }) => {
+        if (offline) return
         if (info.status === 'progress' && typeof info.progress === 'number') {
           report({
             phase: 'downloading',
@@ -80,7 +103,7 @@ async function getWhisperPipeline(): Promise<WhisperPipeline> {
           report({
             phase: 'downloading',
             message: info.file
-              ? `Downloading ${info.file}… (first time only, ~40 MB total — can take several minutes on Wi‑Fi)`
+              ? `Downloading ${info.file}… (first time only, ~40 MB — can take several minutes on Wi‑Fi)`
               : 'Downloading speech model… (first time only, ~40 MB — please wait)',
             file: info.file,
           })
@@ -97,7 +120,10 @@ async function getWhisperPipeline(): Promise<WhisperPipeline> {
 
       report({
         phase: 'loading',
-        message: 'Loading speech model…',
+        message: offline
+          ? 'Loading built-in speech model…'
+          : 'Loading speech model…',
+        progress: offline ? 100 : undefined,
       })
 
       const loadModel = pipeline(
@@ -109,8 +135,7 @@ async function getWhisperPipeline(): Promise<WhisperPipeline> {
       const timeout = new Promise<never>((_, reject) => {
         setTimeout(() => {
           reject(new Error(
-            'Speech model download timed out after 10 minutes. '
-            + 'Check Wi‑Fi, then toggle Talk Mode off and on to retry.',
+            'Speech model setup timed out. Quit DinoClaw, reopen it, and toggle Talk Mode on again.',
           ))
         }, DOWNLOAD_TIMEOUT_MS)
       })
@@ -138,25 +163,30 @@ async function getWhisperPipeline(): Promise<WhisperPipeline> {
   return pipelinePromise
 }
 
+function normalizeTranscript(text: string): string {
+  return text
+    .replace(/\[BLANK_AUDIO\]/gi, '')
+    .replace(/\[[^\]]+\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export async function transcribeBuiltInWhisper(
   pcm: Float32Array,
   sampleRate: number,
 ): Promise<string> {
   if (!pcm.length) throw new Error('No audio captured.')
   const transcriber = await getWhisperPipeline()
-  // whisper-tiny.en is an English-only model. Passing `language`/`task` makes
-  // transformers.js throw ("Cannot specify task or language for an English-only
-  // model"), which previously caused EVERY transcription to fail and surface as
-  // a misleading "voice error / network" message.
   const result = await transcriber(pcm, {
     sampling_rate: sampleRate,
   })
-  const text = result.text?.trim() ?? ''
-  if (!text) throw new Error('Could not make out any words. Try speaking closer to the mic.')
+  const text = normalizeTranscript(result.text ?? '')
+  if (!text) {
+    throw new Error('Could not make out any words. Tap the mic, speak clearly, then tap again.')
+  }
   return text
 }
 
 export function resetWhisperPipelineForTests(): void {
-  pipelinePromise = null
-  loadError = null
+  resetWhisperPipeline()
 }

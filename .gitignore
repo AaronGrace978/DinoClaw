@@ -18,6 +18,9 @@ dist-link
 dist-electron
 release
 
+# Bundled at build time (~40 MB); not committed
+build/whisper-models
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -28,3 +31,4 @@ release
 *.njsproj
 *.sln
 *.sw?
+squashfs-root/

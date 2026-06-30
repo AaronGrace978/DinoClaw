@@ -19,6 +19,7 @@ jobs:
       - run: npm ci
 
       - run: npm run icons
+      - run: node scripts/bundle-whisper-model.mjs
       - run: npm run build
       - run: npx electron-builder --linux --publish never
 

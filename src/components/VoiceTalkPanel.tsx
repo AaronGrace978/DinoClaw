@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Mic, MicOff, Volume2, VolumeX } from 'lucide-react'
 import type { VoiceConfig } from '../shared/contracts'
 import { useVoiceMode } from '../hooks/useVoiceMode'
@@ -23,6 +24,11 @@ export default function VoiceTalkPanel({
   disabled = false,
   isRunning = false,
 }: VoiceTalkPanelProps) {
+  const [appVersion, setAppVersion] = useState<string | null>(null)
+  useEffect(() => {
+    void window.dinoClaw?.getAppVersion?.().then(v => setAppVersion(v)).catch(() => {})
+  }, [])
+
   const voicePrepare = useVoicePrepare(talkMode && config.enabled)
   const voice = useVoiceMode({
     config,
@@ -46,8 +52,7 @@ export default function VoiceTalkPanel({
         <div>
           <strong>Talk Mode needs an update</strong>
           <p>
-            This build is too old for voice input (the &ldquo;network&rdquo; error).
-            TTS still works, but speech-to-text needs v0.5.2+.
+            This AppImage is too old for Talk Mode. Install v0.5.6+ from GitHub Releases.
           </p>
           <p className="voice-help-cmd">
             curl -fsSL https://raw.githubusercontent.com/AaronGrace978/DinoClaw/main/install.sh | bash
@@ -74,7 +79,8 @@ export default function VoiceTalkPanel({
       <div className="voice-panel-head">
         <div>
           <h3>Talk Mode</h3>
-          <p>Tap the mic, say your mission, tap again. Built-in speech recognition — no API key required.</p>
+          <p>Tap the mic, say your mission, tap again. Speech is built into the app — works offline on Steam Deck.</p>
+          {appVersion && <p className="voice-version-tag">DinoClaw v{appVersion}</p>}
         </div>
         <button
           type="button"
@@ -102,7 +108,7 @@ export default function VoiceTalkPanel({
         <div className="voice-panel-status">
           {!config.enabled && <span className="voice-status-line">Voice is off in Settings.</span>}
           {!talkMode && config.enabled && (
-            <span className="voice-status-line">Turn Talk Mode on to set up voice (one-time ~40 MB download).</span>
+            <span className="voice-status-line">Turn Talk Mode on, then tap mic → speak → tap again.</span>
           )}
           {talkMode && voicePrepare.preparing && voicePrepare.status.phase !== 'ready' && (
             <>
@@ -112,7 +118,7 @@ export default function VoiceTalkPanel({
                   <div className="voice-progress-bar" style={{ width: `${voicePrepare.status.progress}%` }} />
                 </div>
               )}
-              <span className="voice-status-hint">First setup on Wi‑Fi often takes 3–10 minutes. It is not frozen — please wait.</span>
+              <span className="voice-status-hint">Loading speech model… first launch can take a minute.</span>
             </>
           )}
           {talkMode && voicePrepare.status.phase === 'ready' && !voice.recording && !voice.transcribing && !isRunning && (

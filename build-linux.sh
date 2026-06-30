@@ -33,6 +33,10 @@ echo "[BUILD] Compiling TypeScript + Vite..."
 npm run build
 
 echo
+echo "[PACK]  Bundling offline speech model (~40 MB)..."
+npm run bundle:whisper
+
+echo
 echo "[PACK]  Packaging AppImage with electron-builder..."
 npx electron-builder --linux
 
