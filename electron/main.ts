@@ -1,7 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, Notification, nativeImage, session } from 'electron'
 import fs from 'node:fs'
+import { createServer, type Server, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import type {
   DinoCreed,
   ExecutionPolicy,
@@ -21,6 +23,15 @@ const sessionDataPath = path.join(app.getPath('temp'), 'dinoclaw-session-data')
 const DEV_LOAD_RETRIES = 20
 const DEV_LOAD_RETRY_DELAY_MS = 250
 const DEV_SERVER_FALLBACK = 'http://127.0.0.1:5173/'
+const MIME_TYPES: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.wasm': 'application/wasm',
+}
 app.setPath('sessionData', sessionDataPath)
 app.commandLine.appendSwitch('disk-cache-dir', path.join(sessionDataPath, 'cache'))
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
@@ -35,6 +46,8 @@ const runtime = new DinoRuntime()
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
+let packagedRendererServer: Server | null = null
+let packagedRendererUrlPromise: Promise<string> | null = null
 
 app.on('second-instance', () => {
   if (isDaemon) return
@@ -106,6 +119,7 @@ function createTray(): void {
 
 function resolvePackagedAssetPath(asset: string): string | null {
   const candidates = [
+    path.join(process.resourcesPath, 'dist', asset),
     path.join(app.getAppPath(), 'dist', asset),
     path.join(__dirname, '../dist', asset),
     path.join(__dirname, '../public', asset),
@@ -256,6 +270,10 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => { isQuitting = true })
+app.on('will-quit', () => {
+  packagedRendererServer?.close()
+  packagedRendererServer = null
+})
 
 async function loadRenderer(win: BrowserWindow, devServerUrl?: string): Promise<void> {
   if (!devServerUrl) {
@@ -283,6 +301,13 @@ async function loadRenderer(win: BrowserWindow, devServerUrl?: string): Promise<
 }
 
 async function loadPackagedRenderer(win: BrowserWindow): Promise<void> {
+  if (process.platform === 'linux') {
+    const url = await ensurePackagedRendererServer()
+    console.warn(`[main] Loading packaged renderer via localhost: ${url}`)
+    await win.loadURL(url)
+    return
+  }
+
   const indexPath = resolveRendererIndexPath()
   if (!indexPath) {
     throw new Error(`Production UI missing. Checked: ${rendererIndexCandidates().join(', ')}`)
@@ -299,23 +324,13 @@ async function loadPackagedRenderer(win: BrowserWindow): Promise<void> {
     throw new Error(`Renderer window was destroyed while loading ${indexPath}`)
   }
 
-  try {
-    await win.loadURL(pathToFileURL(indexPath).toString())
-    return
-  } catch (error) {
-    console.error(`[main] file URL load failed for ${indexPath}: ${error instanceof Error ? error.message : String(error)}`)
-  }
-
-  if (win.isDestroyed()) {
-    throw new Error(`Renderer window was destroyed while loading ${indexPath}`)
-  }
-
-  const extractedIndex = extractRendererForFallback(indexPath)
-  await win.loadFile(extractedIndex)
+  const extractedDir = extractRendererForFallback(indexPath)
+  await win.loadFile(path.join(extractedDir, 'index.html'))
 }
 
 function rendererIndexCandidates(): string[] {
   return [
+    path.join(process.resourcesPath, 'dist', 'index.html'),
     path.join(app.getAppPath(), 'dist', 'index.html'),
     path.join(__dirname, '../dist/index.html'),
     path.join(process.resourcesPath, 'app.asar', 'dist', 'index.html'),
@@ -325,6 +340,77 @@ function rendererIndexCandidates(): string[] {
 
 function resolveRendererIndexPath(): string | null {
   return rendererIndexCandidates().find(candidate => fs.existsSync(candidate)) ?? null
+}
+
+function resolvePackagedRendererDirForServer(): string {
+  const resourceDist = path.join(process.resourcesPath, 'dist')
+  if (fs.existsSync(path.join(resourceDist, 'index.html'))) return resourceDist
+
+  const indexPath = resolveRendererIndexPath()
+  if (!indexPath) {
+    throw new Error(`Production UI missing. Checked: ${rendererIndexCandidates().join(', ')}`)
+  }
+  return extractRendererForFallback(indexPath)
+}
+
+function ensurePackagedRendererServer(): Promise<string> {
+  if (packagedRendererUrlPromise) return packagedRendererUrlPromise
+
+  packagedRendererUrlPromise = new Promise((resolve, reject) => {
+    const rendererDir = resolvePackagedRendererDirForServer()
+    const server = createServer((req, res) => serveRendererFile(rendererDir, req.url, res))
+
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address() as AddressInfo
+      packagedRendererServer = server
+      resolve(`http://127.0.0.1:${address.port}/`)
+    })
+  })
+
+  return packagedRendererUrlPromise
+}
+
+function serveRendererFile(rendererDir: string, requestUrl: string | undefined, res: ServerResponse): void {
+  let pathname = '/'
+  try {
+    pathname = new URL(requestUrl ?? '/', 'http://127.0.0.1').pathname
+  } catch {
+    pathname = '/'
+  }
+
+  const relative = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '')
+  if (relative.includes('..') || path.isAbsolute(relative)) {
+    res.writeHead(403)
+    res.end('Forbidden')
+    return
+  }
+
+  const filePath = path.join(rendererDir, relative)
+  if (!filePath.startsWith(rendererDir + path.sep) && filePath !== rendererDir) {
+    res.writeHead(403)
+    res.end('Forbidden')
+    return
+  }
+
+  fs.stat(filePath, (statError, stat) => {
+    if (statError || !stat.isFile()) {
+      res.writeHead(404)
+      res.end('Not found')
+      return
+    }
+
+    res.writeHead(200, {
+      'Cache-Control': 'no-store',
+      'Content-Type': MIME_TYPES[path.extname(filePath)] ?? 'application/octet-stream',
+    })
+    fs.createReadStream(filePath)
+      .on('error', () => {
+        if (!res.headersSent) res.writeHead(500)
+        res.end('Read error')
+      })
+      .pipe(res)
+  })
 }
 
 function extractRendererForFallback(indexPath: string): string {
@@ -342,8 +428,8 @@ function extractRendererForFallback(indexPath: string): string {
   if (!fs.existsSync(extractedIndex)) {
     throw new Error(`Could not extract renderer fallback from ${sourceDir}`)
   }
-  console.warn(`[main] Loaded renderer from extracted fallback: ${extractedIndex}`)
-  return extractedIndex
+  console.warn(`[main] Extracted renderer fallback: ${targetDir}`)
+  return targetDir
 }
 
 function copyPath(source: string, target: string): void {
