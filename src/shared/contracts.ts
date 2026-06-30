@@ -373,9 +373,9 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   enabled: true,
   inputEnabled: true,
   outputEnabled: true,
-  continuous: true,
+  continuous: false,
   autoSubmit: true,
-  pushToTalk: false,
+  pushToTalk: true,
 }
 
 export interface BrowserSessionInfo {
@@ -573,6 +573,10 @@ export interface DinoClawApi {
   updateBrowser: (config: BrowserConfig) => Promise<void>
   updateVoice: (config: Partial<VoiceConfig>) => Promise<RuntimeSnapshot>
   transcribeAudio: (audio: ArrayBuffer, mimeType: string) => Promise<string>
+  transcribePcm: (samples: Float32Array, sampleRate: number) => Promise<string>
+  speakText: (text: string) => Promise<void>
+  stopSpeech: () => Promise<void>
+  getAppVersion: () => Promise<string>
   getBrowserSession: () => Promise<BrowserSessionInfo>
   clearBrowserSession: () => Promise<void>
   getServiceStatus: () => Promise<ServiceStatus>

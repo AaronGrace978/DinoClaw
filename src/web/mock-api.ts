@@ -90,6 +90,10 @@ export function installWebMock(): void {
       return cloneSnapshot(snapshot)
     },
     transcribeAudio: async () => 'Web preview — install the desktop app for Talk Mode.',
+    transcribePcm: async () => 'Web preview — install the desktop app for Talk Mode.',
+    speakText: async (text) => { window.speechSynthesis?.speak(new SpeechSynthesisUtterance(text)) },
+    stopSpeech: async () => { window.speechSynthesis?.cancel() },
+    getAppVersion: async () => 'web-preview',
     getBrowserSession: async () => snapshot.browserSession,
     clearBrowserSession: async () => {},
     getServiceStatus: async () => 'not_installed',

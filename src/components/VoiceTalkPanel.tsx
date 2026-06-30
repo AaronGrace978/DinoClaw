@@ -1,6 +1,7 @@
 import { Mic, MicOff, Volume2, VolumeX } from 'lucide-react'
 import type { VoiceConfig } from '../shared/contracts'
 import { useVoiceMode } from '../hooks/useVoiceMode'
+import { stopSpeech } from '../lib/voice-speak'
 
 interface VoiceTalkPanelProps {
   config: VoiceConfig
@@ -27,25 +28,31 @@ export default function VoiceTalkPanel({
     disabled: disabled || isRunning,
     onFinalTranscript: (text) => {
       if (config.autoSubmit) onSubmitTranscript(text)
-    },
-    onInterimTranscript: (text) => {
-      if (!config.autoSubmit && text) onSubmitTranscript(text)
+      else onSubmitTranscript(text)
     },
   })
 
   const handleToggleTalkMode = () => {
-    if (!config.enabled) {
-      void onUpdateConfig({ enabled: true, inputEnabled: true })
-    }
+    if (!config.enabled) void onUpdateConfig({ enabled: true, inputEnabled: true })
     onTalkModeChange(!talkMode)
   }
 
-  const handleMicPointerDown = () => {
-    if (config.pushToTalk) voice.startListening()
-  }
-
-  const handleMicPointerUp = () => {
-    if (config.pushToTalk) voice.stopListening()
+  if (voice.needsUpdate) {
+    return (
+      <section className="voice-panel voice-panel--unsupported">
+        <MicOff size={18} />
+        <div>
+          <strong>Talk Mode needs an update</strong>
+          <p>
+            This build is too old for voice input (the &ldquo;network&rdquo; error).
+            TTS still works, but speech-to-text needs v0.5.2+.
+          </p>
+          <p className="voice-help-cmd">
+            curl -fsSL https://raw.githubusercontent.com/AaronGrace978/DinoClaw/main/install.sh | bash
+          </p>
+        </div>
+      </section>
+    )
   }
 
   if (!voice.supported) {
@@ -54,18 +61,18 @@ export default function VoiceTalkPanel({
         <MicOff size={18} />
         <div>
           <strong>Talk mode unavailable</strong>
-          <p>Your build does not expose Web Speech API. Use the text box instead.</p>
+          <p>Use the desktop app for voice missions.</p>
         </div>
       </section>
     )
   }
 
   return (
-    <section className={`voice-panel ${talkMode ? 'voice-panel--active' : ''} ${voice.listening ? 'voice-panel--listening' : ''}`}>
+    <section className={`voice-panel ${talkMode ? 'voice-panel--active' : ''} ${voice.recording ? 'voice-panel--listening' : ''}`}>
       <div className="voice-panel-head">
         <div>
           <h3>Talk Mode</h3>
-          <p>Tell DinoBuddy what to do — hands-free voice missions.</p>
+          <p>Tap the mic, say your mission, tap again. Built-in speech recognition — no API key required.</p>
         </div>
         <button
           type="button"
@@ -80,17 +87,10 @@ export default function VoiceTalkPanel({
       <div className="voice-panel-controls">
         <button
           type="button"
-          className={`voice-mic-btn ${voice.listening ? 'listening' : ''}`}
-          disabled={!config.enabled || !config.inputEnabled || (disabled && !config.pushToTalk) || voice.transcribing}
-          aria-pressed={voice.listening}
-          onClick={() => {
-            if (config.pushToTalk) return
-            if (voice.listening) voice.stopListening()
-            else voice.startListening()
-          }}
-          onPointerDown={handleMicPointerDown}
-          onPointerUp={handleMicPointerUp}
-          onPointerLeave={handleMicPointerUp}
+          className={`voice-mic-btn ${voice.recording ? 'listening' : ''}`}
+          disabled={!config.enabled || !config.inputEnabled || !talkMode || disabled || voice.transcribing}
+          aria-pressed={voice.recording}
+          onClick={voice.toggleRecording}
         >
           <span className="voice-mic-ring" />
           <Mic size={28} />
@@ -98,19 +98,19 @@ export default function VoiceTalkPanel({
 
         <div className="voice-panel-status">
           {!config.enabled && <span className="voice-status-line">Voice is off in Settings.</span>}
-          {config.enabled && talkMode && voice.listening && !voice.transcribing && (
-            <span className="voice-status-line voice-status-line--live">Listening… speak your mission</span>
+          {!talkMode && config.enabled && (
+            <span className="voice-status-line">Turn Talk Mode on, then tap the mic.</span>
+          )}
+          {talkMode && voice.recording && (
+            <span className="voice-status-line voice-status-line--live">Recording… tap mic when done</span>
+          )}
+          {talkMode && !voice.recording && !voice.transcribing && !isRunning && (
+            <span className="voice-status-line">Tap mic → speak → tap again to send</span>
           )}
           {voice.transcribing && (
-            <span className="voice-status-line voice-status-line--live">Transcribing your speech…</span>
-          )}
-          {config.enabled && talkMode && !voice.listening && !isRunning && (
-            <span className="voice-status-line">Talk mode on — waiting for mic</span>
+            <span className="voice-status-line voice-status-line--live">Understanding your speech… (first time may download a small model)</span>
           )}
           {isRunning && <span className="voice-status-line">DinoBuddy is working…</span>}
-          {voice.interimText && (
-            <span className="voice-interim">&ldquo;{voice.interimText}&rdquo;</span>
-          )}
           {voice.error && <span className="voice-error">{voice.error}</span>}
         </div>
       </div>
@@ -122,38 +122,22 @@ export default function VoiceTalkPanel({
             checked={config.autoSubmit}
             onChange={e => void onUpdateConfig({ autoSubmit: e.target.checked })}
           />
-          <span>Auto-send when I stop talking</span>
+          <span>Auto-send mission when transcription finishes</span>
         </label>
         <label className="voice-option">
           <input
             type="checkbox"
             checked={config.outputEnabled}
             onChange={e => {
+              if (!e.target.checked) stopSpeech()
               void onUpdateConfig({ outputEnabled: e.target.checked })
-              if (!e.target.checked) window.speechSynthesis.cancel()
             }}
           />
-          <span>{config.outputEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />} Speak replies aloud</span>
-        </label>
-        <label className="voice-option">
-          <input
-            type="checkbox"
-            checked={config.pushToTalk}
-            onChange={e => void onUpdateConfig({ pushToTalk: e.target.checked })}
-          />
-          <span>Push-to-talk (hold mic button)</span>
+          <span>{config.outputEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />} Speak replies aloud (TTS)</span>
         </label>
       </div>
     </section>
   )
 }
 
-export function speakIfEnabled(config: VoiceConfig, text: string, lastSpokenRef: React.MutableRefObject<string>) {
-  if (!config.enabled || !config.outputEnabled || !text.trim()) return
-  if (lastSpokenRef.current === text) return
-  lastSpokenRef.current = text
-  window.speechSynthesis.cancel()
-  const utterance = new SpeechSynthesisUtterance(text.trim())
-  utterance.rate = 1
-  window.speechSynthesis.speak(utterance)
-}
+export { speakIfEnabled } from '../lib/voice-speak'

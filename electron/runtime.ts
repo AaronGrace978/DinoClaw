@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import type {
   ApprovalRequest,
@@ -40,7 +41,8 @@ import type {
 } from '../src/shared/contracts'
 import { DEFAULT_VOICE_CONFIG } from '../src/shared/contracts'
 import { buildSystemPrompt, deriveMood } from './creed'
-import { transcribeSpeech } from './voice-stt'
+import { transcribePcm as runTranscribePcm, transcribeSpeech } from './voice-stt'
+import { speakSystemText, stopSystemSpeech } from './voice-tts'
 import { callModel } from './provider'
 import { createStorage, type PersistedState } from './storage'
 import { DinoStomp } from './dino-stomp'
@@ -791,6 +793,28 @@ export class DinoRuntime {
 
   async transcribeAudio(audio: Buffer, mimeType: string): Promise<string> {
     return transcribeSpeech(audio, mimeType, this.state.model)
+  }
+
+  async transcribePcm(samples: Float32Array, sampleRate: number): Promise<string> {
+    return runTranscribePcm(samples, sampleRate, this.state.model)
+  }
+
+  getAppVersion(): string {
+    try {
+      const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../package.json')
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: string }
+      return pkg.version ?? '0.0.0'
+    } catch {
+      return '0.0.0'
+    }
+  }
+
+  async speakText(text: string): Promise<void> {
+    await speakSystemText(text)
+  }
+
+  stopSpeech(): void {
+    stopSystemSpeech()
   }
 
   async clearBrowserSession(): Promise<void> {
