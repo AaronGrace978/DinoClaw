@@ -36,16 +36,23 @@ function spawnSpeak(cmd: string, args: string[]): Promise<void> {
 }
 
 async function speakLinux(text: string): Promise<void> {
-  if (await commandExists('spd-say')) {
-    await spawnSpeak('spd-say', [text])
-    return
-  }
+  // Prefer engines that synthesize audio directly and block until the speech
+  // finishes (so playback is reliable and Stop actually works). espeak-ng is
+  // exactly what the README tells Steam Deck users to install. spd-say is tried
+  // only as a fallback because on SteamOS its speech-dispatcher backend often
+  // exits "successfully" while producing no sound at all — which left Dino
+  // silent even after users installed espeak-ng.
   if (await commandExists('espeak-ng')) {
     await spawnSpeak('espeak-ng', ['-s', '165', '-v', 'en-us', text])
     return
   }
   if (await commandExists('espeak')) {
     await spawnSpeak('espeak', ['-s', '165', '-v', 'en-us', text])
+    return
+  }
+  if (await commandExists('spd-say')) {
+    // -w = wait until speech completes so the process stays alive (killable to Stop).
+    await spawnSpeak('spd-say', ['-w', text])
     return
   }
   if (await commandExists('festival')) {
