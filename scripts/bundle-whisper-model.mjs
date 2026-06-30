@@ -10,7 +10,7 @@ import { env, pipeline } from '@huggingface/transformers'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const modelDir = path.join(root, 'build', 'whisper-models')
-const marker = path.join(modelDir, 'Xenova', 'whisper-tiny.en', 'onnx', 'model_quantized.onnx')
+const marker = path.join(modelDir, 'Xenova', 'whisper-tiny.en', 'onnx', 'encoder_model_quantized.onnx')
 
 if (fs.existsSync(marker)) {
   console.log('[whisper] Model already bundled at', modelDir)

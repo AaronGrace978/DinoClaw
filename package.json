@@ -1,7 +1,7 @@
 {
   "name": "dinoclaw",
   "private": true,
-  "version": "0.5.7",
+  "version": "0.5.10",
   "description": "AI for the people. Desktop AI agent by BostonAi.io",
   "author": "BostonAi.io <hello@bostonai.io>",
   "homepage": "https://bostonai.io",
@@ -81,7 +81,9 @@
       {
         "from": "build/whisper-models",
         "to": "whisper-models",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
@@ -105,9 +107,25 @@
       "description": "DinoClaw is a free desktop AI agent that runs on your machine. Missions, memory, skills, Telegram/Discord, and more.",
       "extraResources": [
         {
+          "from": "dist",
+          "to": "dist",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "build/whisper-models",
+          "to": "whisper-models",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
           "from": "build/espeak-ng",
           "to": "espeak-ng",
-          "filter": ["**/*"]
+          "filter": [
+            "**/*"
+          ]
         }
       ],
       "desktop": {

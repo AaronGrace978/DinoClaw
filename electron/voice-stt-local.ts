@@ -18,6 +18,10 @@ type WhisperPipeline = (
 
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
 const MODEL_ID = 'Xenova/whisper-tiny.en'
+const MODEL_MARKER_FILES = [
+  path.join('onnx', 'encoder_model_quantized.onnx'),
+  path.join('onnx', 'decoder_model_merged_quantized.onnx'),
+]
 
 let pipelinePromise: Promise<WhisperPipeline> | null = null
 let loadError: string | null = null
@@ -26,8 +30,8 @@ let onProgress: ((progress: VoicePrepareProgress) => void) | null = null
 function bundledModelDir(): string | null {
   if (!app.isPackaged) return null
   const bundled = path.join(process.resourcesPath, 'whisper-models')
-  const modelOnnx = path.join(bundled, 'Xenova', 'whisper-tiny.en', 'onnx', 'model_quantized.onnx')
-  return fs.existsSync(modelOnnx) ? bundled : null
+  const modelDir = path.join(bundled, 'Xenova', 'whisper-tiny.en')
+  return MODEL_MARKER_FILES.every(file => fs.existsSync(path.join(modelDir, file))) ? bundled : null
 }
 
 function modelCacheDir(): string {

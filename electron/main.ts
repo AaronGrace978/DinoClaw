@@ -1,5 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, Notification, nativeImage, session } from 'electron'
 import fs from 'node:fs'
+import { get as httpGet } from 'node:http'
+import { createServer, type Server, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type {
@@ -21,9 +24,25 @@ const sessionDataPath = path.join(app.getPath('temp'), 'dinoclaw-session-data')
 const DEV_LOAD_RETRIES = 20
 const DEV_LOAD_RETRY_DELAY_MS = 250
 const DEV_SERVER_FALLBACK = 'http://127.0.0.1:5173/'
+const MIME_TYPES: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.wasm': 'application/wasm',
+}
 app.setPath('sessionData', sessionDataPath)
 app.commandLine.appendSwitch('disk-cache-dir', path.join(sessionDataPath, 'cache'))
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
+
+// AppImage / Steam Deck: Chromium sandbox often blocks file:// and loopback loads.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('no-sandbox')
+  app.commandLine.appendSwitch('disable-gpu-sandbox')
+  app.commandLine.appendSwitch('disable-dev-shm-usage')
+}
 
 const singleInstance = app.requestSingleInstanceLock()
 if (!singleInstance) {
@@ -35,6 +54,8 @@ const runtime = new DinoRuntime()
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
+let packagedRendererServer: Server | null = null
+let packagedRendererUrlPromise: Promise<string> | null = null
 
 app.on('second-instance', () => {
   if (isDaemon) return
@@ -58,11 +79,18 @@ async function createWindow(): Promise<void> {
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: !(app.isPackaged && process.platform === 'linux'),
     },
   })
 
   mainWindow.setMenuBarVisibility(false)
   attachRendererDiagnostics(mainWindow)
+  mainWindow.on('close', (e) => {
+    if (tray && !isQuitting) {
+      e.preventDefault()
+      mainWindow?.hide()
+    }
+  })
 
   const devServerUrl = !app.isPackaged
     ? (process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL || DEV_SERVER_FALLBACK)
@@ -72,19 +100,12 @@ async function createWindow(): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown renderer load error'
     console.error(`[main] Failed to load renderer: ${message}`)
-    await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderBootstrapErrorHtml(message))}`)
+    await loadBootstrapError(mainWindow, message)
   }
-
-  mainWindow.on('close', (e) => {
-    if (tray && !isQuitting) {
-      e.preventDefault()
-      mainWindow?.hide()
-    }
-  })
 }
 
 function createTray(): void {
-  const iconPath = path.join(__dirname, '../public/dino.svg')
+  const iconPath = resolvePackagedAssetPath('dino.svg') ?? path.join(__dirname, '../public/dino.svg')
   let icon: Electron.NativeImage
   try {
     icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
@@ -103,6 +124,16 @@ function createTray(): void {
 
   tray.setContextMenu(contextMenu)
   tray.on('double-click', () => { mainWindow?.show(); mainWindow?.focus() })
+}
+
+function resolvePackagedAssetPath(asset: string): string | null {
+  const candidates = [
+    path.join(process.resourcesPath, 'dist', asset),
+    path.join(app.getAppPath(), 'dist', asset),
+    path.join(__dirname, '../dist', asset),
+    path.join(__dirname, '../public', asset),
+  ]
+  return candidates.find(candidate => fs.existsSync(candidate)) ?? null
 }
 
 app.whenReady().then(async () => {
@@ -229,12 +260,17 @@ app.whenReady().then(async () => {
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      await createWindow()
+      await createWindow().catch(error => {
+        console.error(`[main] Failed to recreate window: ${error instanceof Error ? error.message : String(error)}`)
+      })
     } else {
       mainWindow?.show()
       mainWindow?.focus()
     }
   })
+}).catch(error => {
+  console.error(`[main] Startup failed: ${error instanceof Error ? error.message : String(error)}`)
+  app.quit()
 })
 
 app.on('window-all-closed', () => {
@@ -243,14 +279,14 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => { isQuitting = true })
+app.on('will-quit', () => {
+  packagedRendererServer?.close()
+  packagedRendererServer = null
+})
 
 async function loadRenderer(win: BrowserWindow, devServerUrl?: string): Promise<void> {
   if (!devServerUrl) {
-    const indexPath = path.join(__dirname, '../dist/index.html')
-    if (!fs.existsSync(indexPath)) {
-      throw new Error('Production UI missing. Run: npm run build')
-    }
-    await win.loadFile(indexPath)
+    await loadPackagedRenderer(win)
     return
   }
 
@@ -273,6 +309,187 @@ async function loadRenderer(win: BrowserWindow, devServerUrl?: string): Promise<
   throw lastError instanceof Error ? lastError : new Error(`Unable to load renderer URL: ${target}`)
 }
 
+async function loadPackagedRenderer(win: BrowserWindow): Promise<void> {
+  const indexPath = resolveRendererIndexPath()
+  if (!indexPath) {
+    throw new Error(`Production UI missing. Checked: ${rendererIndexCandidates().join(', ')}`)
+  }
+
+  const attempts: Array<() => Promise<void>> = [
+    async () => {
+      console.warn(`[main] Loading packaged renderer via loadFile: ${indexPath}`)
+      await win.loadFile(indexPath)
+    },
+    async () => {
+      const extractedDir = extractRendererForFallback(indexPath)
+      const extractedIndex = path.join(extractedDir, 'index.html')
+      console.warn(`[main] Loading packaged renderer from extracted copy: ${extractedIndex}`)
+      await win.loadFile(extractedIndex)
+    },
+  ]
+
+  if (process.platform === 'linux') {
+    attempts.push(async () => {
+      const url = await ensurePackagedRendererServer()
+      await verifyPackagedRendererServer(url)
+      console.warn(`[main] Loading packaged renderer via localhost: ${url}`)
+      await win.loadURL(url)
+    })
+  }
+
+  let lastError: unknown
+  for (const attempt of attempts) {
+    if (win.isDestroyed()) {
+      throw new Error(`Renderer window was destroyed while loading ${indexPath}`)
+    }
+    try {
+      await attempt()
+      return
+    } catch (error) {
+      lastError = error
+      console.error(`[main] Packaged renderer attempt failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Unable to load packaged renderer from ${indexPath}`)
+}
+
+function rendererIndexCandidates(): string[] {
+  return [
+    path.join(process.resourcesPath, 'dist', 'index.html'),
+    path.join(app.getAppPath(), 'dist', 'index.html'),
+    path.join(__dirname, '../dist/index.html'),
+    path.join(process.resourcesPath, 'app.asar', 'dist', 'index.html'),
+    path.join(process.resourcesPath, 'app', 'dist', 'index.html'),
+  ]
+}
+
+function resolveRendererIndexPath(): string | null {
+  return rendererIndexCandidates().find(candidate => fs.existsSync(candidate)) ?? null
+}
+
+function resolvePackagedRendererDirForServer(): string {
+  const resourceDist = path.join(process.resourcesPath, 'dist')
+  if (fs.existsSync(path.join(resourceDist, 'index.html'))) return resourceDist
+
+  const indexPath = resolveRendererIndexPath()
+  if (!indexPath) {
+    throw new Error(`Production UI missing. Checked: ${rendererIndexCandidates().join(', ')}`)
+  }
+  return extractRendererForFallback(indexPath)
+}
+
+function ensurePackagedRendererServer(): Promise<string> {
+  if (packagedRendererUrlPromise) return packagedRendererUrlPromise
+
+  packagedRendererUrlPromise = new Promise((resolve, reject) => {
+    const rendererDir = resolvePackagedRendererDirForServer()
+    const server = createServer((req, res) => serveRendererFile(rendererDir, req.url, res))
+
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address() as AddressInfo
+      packagedRendererServer = server
+      resolve(`http://127.0.0.1:${address.port}/`)
+    })
+  })
+
+  return packagedRendererUrlPromise
+}
+
+function verifyPackagedRendererServer(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = httpGet(url, (response) => {
+      response.resume()
+      if (response.statusCode && response.statusCode >= 200 && response.statusCode < 400) {
+        resolve()
+        return
+      }
+      reject(new Error(`Renderer server health check failed (${response.statusCode ?? 'unknown'}) for ${url}`))
+    })
+    request.on('error', reject)
+    request.setTimeout(5000, () => {
+      request.destroy(new Error(`Renderer server health check timed out for ${url}`))
+    })
+  })
+}
+
+function serveRendererFile(rendererDir: string, requestUrl: string | undefined, res: ServerResponse): void {
+  let pathname = '/'
+  try {
+    pathname = new URL(requestUrl ?? '/', 'http://127.0.0.1').pathname
+  } catch {
+    pathname = '/'
+  }
+
+  const relative = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '')
+  if (relative.includes('..') || path.isAbsolute(relative)) {
+    res.writeHead(403)
+    res.end('Forbidden')
+    return
+  }
+
+  const filePath = path.join(rendererDir, relative)
+  if (!filePath.startsWith(rendererDir + path.sep) && filePath !== rendererDir) {
+    res.writeHead(403)
+    res.end('Forbidden')
+    return
+  }
+
+  fs.stat(filePath, (statError, stat) => {
+    if (statError || !stat.isFile()) {
+      res.writeHead(404)
+      res.end('Not found')
+      return
+    }
+
+    res.writeHead(200, {
+      'Cache-Control': 'no-store',
+      'Content-Type': MIME_TYPES[path.extname(filePath)] ?? 'application/octet-stream',
+    })
+    fs.createReadStream(filePath)
+      .on('error', () => {
+        if (!res.headersSent) res.writeHead(500)
+        res.end('Read error')
+      })
+      .pipe(res)
+  })
+}
+
+function extractRendererForFallback(indexPath: string): string {
+  const sourceDir = path.dirname(indexPath)
+  const targetDir = path.join(app.getPath('userData'), 'renderer-fallback')
+  fs.rmSync(targetDir, { recursive: true, force: true })
+  fs.mkdirSync(targetDir, { recursive: true })
+
+  for (const entry of ['index.html', 'dino.svg', 'assets', 'ort', 'whisper-models', 'link', 'link-manifest.webmanifest', 'link-sw.js']) {
+    const source = path.join(sourceDir, entry)
+    if (fs.existsSync(source)) copyPath(source, path.join(targetDir, entry))
+  }
+
+  const extractedIndex = path.join(targetDir, 'index.html')
+  if (!fs.existsSync(extractedIndex)) {
+    throw new Error(`Could not extract renderer fallback from ${sourceDir}`)
+  }
+  console.warn(`[main] Extracted renderer fallback: ${targetDir}`)
+  return targetDir
+}
+
+function copyPath(source: string, target: string): void {
+  const stat = fs.statSync(source)
+  if (stat.isDirectory()) {
+    fs.mkdirSync(target, { recursive: true })
+    for (const entry of fs.readdirSync(source)) {
+      copyPath(path.join(source, entry), path.join(target, entry))
+    }
+    return
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.copyFileSync(source, target)
+}
+
 function normalizeDevServerUrl(url: string): string {
   try {
     const parsed = new URL(url)
@@ -285,6 +502,19 @@ function normalizeDevServerUrl(url: string): string {
   }
 }
 
+async function loadBootstrapError(win: BrowserWindow | null, message: string): Promise<void> {
+  const target = win && !win.isDestroyed() ? win : mainWindow
+  if (!target || target.isDestroyed()) {
+    console.error(`[main] Startup error (no window to display): ${message}`)
+    return
+  }
+  try {
+    await target.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderBootstrapErrorHtml(message))}`)
+  } catch (error) {
+    console.error(`[main] Failed to render bootstrap error: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 function renderBootstrapErrorHtml(message: string): string {
   return [
     '<!doctype html>',
@@ -292,7 +522,7 @@ function renderBootstrapErrorHtml(message: string): string {
     '<head><meta charset="utf-8"><title>DinoClaw - Startup Error</title></head>',
     '<body style="background:#0c1118;color:#e5ebff;font-family:Segoe UI,Arial,sans-serif;padding:24px;line-height:1.45;">',
     '<h2 style="margin-top:0;">DinoClaw could not load the UI.</h2>',
-    '<p>This is usually a temporary dev-server startup race. Keep the terminal open and retry.</p>',
+    '<p>Try reinstalling from the latest release, or run from a terminal with <code>--no-sandbox</code> on Steam Deck.</p>',
     `<pre style="white-space:pre-wrap;background:#111826;padding:12px;border-radius:8px;">${escapeHtml(message)}</pre>`,
     '</body>',
     '</html>',
@@ -311,7 +541,7 @@ function delay(ms: number): Promise<void> {
 }
 
 function attachRendererDiagnostics(win: BrowserWindow): void {
-  if (app.isPackaged) return
+  if (app.isPackaged && process.platform !== 'linux') return
 
   win.webContents.on('console-message', (_event, level, message) => {
     console.log(`[renderer:${level}] ${message}`)
