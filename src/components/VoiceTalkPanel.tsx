@@ -1,6 +1,7 @@
 import { Mic, MicOff, Volume2, VolumeX } from 'lucide-react'
 import type { VoiceConfig } from '../shared/contracts'
 import { useVoiceMode } from '../hooks/useVoiceMode'
+import { useVoicePrepare } from '../hooks/useVoicePrepare'
 import { stopSpeech } from '../lib/voice-speak'
 
 interface VoiceTalkPanelProps {
@@ -22,6 +23,7 @@ export default function VoiceTalkPanel({
   disabled = false,
   isRunning = false,
 }: VoiceTalkPanelProps) {
+  const voicePrepare = useVoicePrepare(talkMode && config.enabled)
   const voice = useVoiceMode({
     config,
     talkMode,
@@ -88,7 +90,8 @@ export default function VoiceTalkPanel({
         <button
           type="button"
           className={`voice-mic-btn ${voice.recording ? 'listening' : ''}`}
-          disabled={!config.enabled || !config.inputEnabled || !talkMode || disabled || voice.transcribing}
+          disabled={!config.enabled || !config.inputEnabled || !talkMode || disabled || voice.transcribing
+            || (voicePrepare.preparing && voicePrepare.status.phase !== 'ready')}
           aria-pressed={voice.recording}
           onClick={voice.toggleRecording}
         >
@@ -99,16 +102,33 @@ export default function VoiceTalkPanel({
         <div className="voice-panel-status">
           {!config.enabled && <span className="voice-status-line">Voice is off in Settings.</span>}
           {!talkMode && config.enabled && (
-            <span className="voice-status-line">Turn Talk Mode on, then tap the mic.</span>
+            <span className="voice-status-line">Turn Talk Mode on to set up voice (one-time ~40 MB download).</span>
+          )}
+          {talkMode && voicePrepare.preparing && voicePrepare.status.phase !== 'ready' && (
+            <>
+              <span className="voice-status-line voice-status-line--live">{voicePrepare.status.message}</span>
+              {typeof voicePrepare.status.progress === 'number' && (
+                <div className="voice-progress">
+                  <div className="voice-progress-bar" style={{ width: `${voicePrepare.status.progress}%` }} />
+                </div>
+              )}
+              <span className="voice-status-hint">First setup on Wi‑Fi often takes 3–10 minutes. It is not frozen — please wait.</span>
+            </>
+          )}
+          {talkMode && voicePrepare.status.phase === 'ready' && !voice.recording && !voice.transcribing && !isRunning && (
+            <span className="voice-status-line voice-status-line--live">{voicePrepare.status.message}</span>
+          )}
+          {talkMode && voicePrepare.status.phase === 'error' && (
+            <span className="voice-error">{voicePrepare.status.message}</span>
           )}
           {talkMode && voice.recording && (
             <span className="voice-status-line voice-status-line--live">Recording… tap mic when done</span>
           )}
-          {talkMode && !voice.recording && !voice.transcribing && !isRunning && (
+          {talkMode && !voice.recording && !voice.transcribing && !isRunning && voicePrepare.status.phase === 'ready' && (
             <span className="voice-status-line">Tap mic → speak → tap again to send</span>
           )}
           {voice.transcribing && (
-            <span className="voice-status-line voice-status-line--live">Understanding your speech… (first time may download a small model)</span>
+            <span className="voice-status-line voice-status-line--live">Understanding your speech…</span>
           )}
           {isRunning && <span className="voice-status-line">DinoBuddy is working…</span>}
           {voice.error && <span className="voice-error">{voice.error}</span>}

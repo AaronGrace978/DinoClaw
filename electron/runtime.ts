@@ -43,6 +43,12 @@ import { DEFAULT_VOICE_CONFIG } from '../src/shared/contracts'
 import { buildSystemPrompt, deriveMood } from './creed'
 import { transcribePcm as runTranscribePcm, transcribeSpeech } from './voice-stt'
 import { speakSystemText, stopSystemSpeech } from './voice-tts'
+import {
+  isWhisperModelReady,
+  prepareWhisperModel,
+  setWhisperProgressHandler,
+  type VoicePrepareProgress,
+} from './voice-stt-local'
 import { callModel } from './provider'
 import { createStorage, type PersistedState } from './storage'
 import { DinoStomp } from './dino-stomp'
@@ -214,6 +220,10 @@ export class DinoRuntime {
   private browserConfig: BrowserConfigType
   private voiceConfig: VoiceConfig
   private channelConfig: ChannelConfig
+  private voiceStatus: VoicePrepareProgress = {
+    phase: 'idle',
+    message: 'Tap Talk Mode on to set up voice.',
+  }
 
   constructor() {
     this.dataDir = path.join(app.getPath('userData'), 'dinoclaw')
@@ -251,6 +261,11 @@ export class DinoRuntime {
     this.scheduler = new Scheduler(this, jobs => this.syncCronJobs(jobs))
     this.docker = new DockerSandbox(this.state.dockerConfig)
     this.serviceManager = new ServiceManager()
+
+    setWhisperProgressHandler((status) => {
+      this.voiceStatus = status
+      this.emitVoiceStatus(status)
+    })
 
     this.stomp = new DinoStomp({
       dataDir: this.dataDir,
@@ -815,6 +830,30 @@ export class DinoRuntime {
 
   stopSpeech(): void {
     stopSystemSpeech()
+  }
+
+  getVoiceStatus(): VoicePrepareProgress {
+    return this.voiceStatus
+  }
+
+  async prepareVoice(): Promise<VoicePrepareProgress> {
+    if (isWhisperModelReady()) {
+      this.voiceStatus = {
+        phase: 'ready',
+        message: 'Speech model ready — tap mic and talk.',
+        progress: 100,
+      }
+      return this.voiceStatus
+    }
+    try {
+      await prepareWhisperModel()
+      return this.voiceStatus
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Speech model setup failed.'
+      this.voiceStatus = { phase: 'error', message }
+      this.emitVoiceStatus(this.voiceStatus)
+      throw error
+    }
   }
 
   async clearBrowserSession(): Promise<void> {
@@ -1530,6 +1569,12 @@ export class DinoRuntime {
   private emitNotification(title: string, body: string): void {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('dinoclaw:notification', { title, body })
+    }
+  }
+
+  private emitVoiceStatus(status: VoicePrepareProgress): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('dinoclaw:voiceStatus', status)
     }
   }
 

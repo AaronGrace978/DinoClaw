@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.5.2-00e68a?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-0.5.3-00e68a?style=flat-square" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Mac%20%7C%20Linux-333?style=flat-square" />
   <img src="https://img.shields.io/badge/by-BostonAi.io-00e68a?style=flat-square" />

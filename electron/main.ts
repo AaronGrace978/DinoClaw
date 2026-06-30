@@ -190,7 +190,8 @@ app.whenReady().then(async () => {
     runtime.transcribePcm(samples, sampleRate))
   ipcMain.handle('dinoclaw:speakText', (_e, text: string) => runtime.speakText(text))
   ipcMain.handle('dinoclaw:stopSpeech', () => { runtime.stopSpeech() })
-  ipcMain.handle('dinoclaw:getAppVersion', () => runtime.getAppVersion())
+  ipcMain.handle('dinoclaw:prepareVoice', () => runtime.prepareVoice())
+  ipcMain.handle('dinoclaw:getVoiceStatus', () => runtime.getVoiceStatus())
   ipcMain.handle('dinoclaw:getBrowserSession', () => runtime.getBrowserSessionInfo())
   ipcMain.handle('dinoclaw:clearBrowserSession', () => runtime.clearBrowserSession())
 
