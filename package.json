@@ -1,7 +1,7 @@
 {
   "name": "dinoclaw",
   "private": true,
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "AI for the people. Desktop AI agent by BostonAi.io",
   "author": "BostonAi.io <hello@bostonai.io>",
   "homepage": "https://bostonai.io",
@@ -81,7 +81,9 @@
       {
         "from": "build/whisper-models",
         "to": "whisper-models",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
@@ -107,12 +109,16 @@
         {
           "from": "build/whisper-models",
           "to": "whisper-models",
-          "filter": ["**/*"]
+          "filter": [
+            "**/*"
+          ]
         },
         {
           "from": "build/espeak-ng",
           "to": "espeak-ng",
-          "filter": ["**/*"]
+          "filter": [
+            "**/*"
+          ]
         }
       ],
       "desktop": {
