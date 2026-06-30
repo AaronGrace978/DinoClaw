@@ -163,7 +163,13 @@ export const useDinoStore = create<DinoStore>((set) => ({
   hydrate: async () => {
     set({ isLoading: true, error: null })
     try {
-      if (!window.dinoClaw) { set({ isLoading: false }); return }
+      if (!window.dinoClaw) {
+        set({
+          isLoading: false,
+          error: 'Desktop bridge failed to load. Install DinoClaw v0.5.13+ and restart the app.',
+        })
+        return
+      }
       const snapshot = await fetchSnapshot()
       const workspace = await window.dinoClaw.getWorkspace()
       set({ ...snapshot, isLoading: false, workspace, approvalQueue: snapshot.pendingApprovals ?? [] })
