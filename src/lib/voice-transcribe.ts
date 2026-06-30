@@ -29,7 +29,11 @@ function emit(status: VoicePrepareProgress): void {
 
 export function onRendererVoiceStatus(listener: (status: VoicePrepareProgress) => void): () => void {
   listeners.add(listener)
-  return () => listeners.delete(listener)
+  const unsubscribeMain = window.dinoClaw?.onVoiceStatus?.((status) => emit(status))
+  return () => {
+    listeners.delete(listener)
+    unsubscribeMain?.()
+  }
 }
 
 export function getRendererVoiceStatus(): VoicePrepareProgress {
@@ -75,9 +79,56 @@ async function getPipeline(): Promise<WhisperFn> {
   return pipelinePromise
 }
 
+function canUseMainVoice(): boolean {
+  return typeof window.dinoClaw?.prepareVoice === 'function'
+    && typeof window.dinoClaw?.transcribePcm === 'function'
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function combinedVoiceError(prefix: string, errors: string[]): Error {
+  const detail = errors.filter(Boolean).slice(0, 2).join(' | ')
+  return new Error(detail ? `${prefix} Details: ${detail}` : prefix)
+}
+
+async function prepareMainVoice(): Promise<VoicePrepareProgress> {
+  if (!canUseMainVoice()) throw new Error('Desktop speech engine unavailable.')
+
+  try {
+    const status = await window.dinoClaw!.getVoiceStatus?.()
+    if (status) emit(status)
+  } catch {
+    // Status is best-effort; prepareVoice below will report the real failure.
+  }
+
+  const result = await window.dinoClaw!.prepareVoice()
+  emit(result)
+  return result
+}
+
 export async function prepareRendererVoice(): Promise<VoicePrepareProgress> {
-  await getPipeline()
-  return currentStatus
+  const errors: string[] = []
+
+  if (canUseMainVoice()) {
+    try {
+      return await prepareMainVoice()
+    } catch (error) {
+      errors.push(errorMessage(error))
+    }
+  }
+
+  try {
+    await getPipeline()
+    return currentStatus
+  } catch (error) {
+    errors.push(errorMessage(error))
+    throw combinedVoiceError(
+      'Speech model setup failed. Reinstall the latest DinoClaw AppImage so the offline voice assets are bundled.',
+      errors,
+    )
+  }
 }
 
 function normalizeTranscript(text: string): string {
@@ -90,13 +141,33 @@ function normalizeTranscript(text: string): string {
 
 export async function transcribeRendererPcm(pcm: Float32Array, sampleRate: number): Promise<string> {
   if (!pcm.length) throw new Error('No audio captured.')
-  const transcriber = await getPipeline()
-  const result = await transcriber(pcm, { sampling_rate: sampleRate })
-  const text = normalizeTranscript(result.text ?? '')
-  if (!text) {
-    throw new Error('Could not make out any words. Tap the mic, speak clearly, then tap again.')
+  const errors: string[] = []
+
+  if (canUseMainVoice()) {
+    try {
+      const buf = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer
+      const text = normalizeTranscript(await window.dinoClaw!.transcribePcm(buf, sampleRate))
+      if (text) return text
+      errors.push('Desktop speech engine returned an empty transcript.')
+    } catch (error) {
+      errors.push(errorMessage(error))
+    }
   }
-  return text
+
+  try {
+    const transcriber = await getPipeline()
+    const result = await transcriber(pcm, { sampling_rate: sampleRate })
+    const text = normalizeTranscript(result.text ?? '')
+    if (text) return text
+    errors.push('Renderer speech engine returned an empty transcript.')
+  } catch (error) {
+    errors.push(errorMessage(error))
+  }
+
+  throw combinedVoiceError(
+    'Could not understand your voice. Tap the mic, speak clearly, then tap again.',
+    errors,
+  )
 }
 
 export function resetRendererVoiceForTests(): void {

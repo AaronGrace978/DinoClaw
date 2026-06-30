@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, Notification, nativeImage, session } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import type {
   DinoCreed,
   ExecutionPolicy,
@@ -63,6 +63,12 @@ async function createWindow(): Promise<void> {
 
   mainWindow.setMenuBarVisibility(false)
   attachRendererDiagnostics(mainWindow)
+  mainWindow.on('close', (e) => {
+    if (tray && !isQuitting) {
+      e.preventDefault()
+      mainWindow?.hide()
+    }
+  })
 
   const devServerUrl = !app.isPackaged
     ? (process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL || DEV_SERVER_FALLBACK)
@@ -72,19 +78,12 @@ async function createWindow(): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown renderer load error'
     console.error(`[main] Failed to load renderer: ${message}`)
-    await mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderBootstrapErrorHtml(message))}`)
+    await loadBootstrapError(mainWindow, message)
   }
-
-  mainWindow.on('close', (e) => {
-    if (tray && !isQuitting) {
-      e.preventDefault()
-      mainWindow?.hide()
-    }
-  })
 }
 
 function createTray(): void {
-  const iconPath = path.join(__dirname, '../public/dino.svg')
+  const iconPath = resolvePackagedAssetPath('dino.svg') ?? path.join(__dirname, '../public/dino.svg')
   let icon: Electron.NativeImage
   try {
     icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
@@ -103,6 +102,15 @@ function createTray(): void {
 
   tray.setContextMenu(contextMenu)
   tray.on('double-click', () => { mainWindow?.show(); mainWindow?.focus() })
+}
+
+function resolvePackagedAssetPath(asset: string): string | null {
+  const candidates = [
+    path.join(app.getAppPath(), 'dist', asset),
+    path.join(__dirname, '../dist', asset),
+    path.join(__dirname, '../public', asset),
+  ]
+  return candidates.find(candidate => fs.existsSync(candidate)) ?? null
 }
 
 app.whenReady().then(async () => {
@@ -229,12 +237,17 @@ app.whenReady().then(async () => {
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      await createWindow()
+      await createWindow().catch(error => {
+        console.error(`[main] Failed to recreate window: ${error instanceof Error ? error.message : String(error)}`)
+      })
     } else {
       mainWindow?.show()
       mainWindow?.focus()
     }
   })
+}).catch(error => {
+  console.error(`[main] Startup failed: ${error instanceof Error ? error.message : String(error)}`)
+  app.quit()
 })
 
 app.on('window-all-closed', () => {
@@ -246,11 +259,7 @@ app.on('before-quit', () => { isQuitting = true })
 
 async function loadRenderer(win: BrowserWindow, devServerUrl?: string): Promise<void> {
   if (!devServerUrl) {
-    const indexPath = path.join(__dirname, '../dist/index.html')
-    if (!fs.existsSync(indexPath)) {
-      throw new Error('Production UI missing. Run: npm run build')
-    }
-    await win.loadFile(indexPath)
+    await loadPackagedRenderer(win)
     return
   }
 
@@ -273,6 +282,83 @@ async function loadRenderer(win: BrowserWindow, devServerUrl?: string): Promise<
   throw lastError instanceof Error ? lastError : new Error(`Unable to load renderer URL: ${target}`)
 }
 
+async function loadPackagedRenderer(win: BrowserWindow): Promise<void> {
+  const indexPath = resolveRendererIndexPath()
+  if (!indexPath) {
+    throw new Error(`Production UI missing. Checked: ${rendererIndexCandidates().join(', ')}`)
+  }
+
+  try {
+    await win.loadFile(indexPath)
+    return
+  } catch (error) {
+    console.error(`[main] loadFile failed for ${indexPath}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  if (win.isDestroyed()) {
+    throw new Error(`Renderer window was destroyed while loading ${indexPath}`)
+  }
+
+  try {
+    await win.loadURL(pathToFileURL(indexPath).toString())
+    return
+  } catch (error) {
+    console.error(`[main] file URL load failed for ${indexPath}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  if (win.isDestroyed()) {
+    throw new Error(`Renderer window was destroyed while loading ${indexPath}`)
+  }
+
+  const extractedIndex = extractRendererForFallback(indexPath)
+  await win.loadFile(extractedIndex)
+}
+
+function rendererIndexCandidates(): string[] {
+  return [
+    path.join(app.getAppPath(), 'dist', 'index.html'),
+    path.join(__dirname, '../dist/index.html'),
+    path.join(process.resourcesPath, 'app.asar', 'dist', 'index.html'),
+    path.join(process.resourcesPath, 'app', 'dist', 'index.html'),
+  ]
+}
+
+function resolveRendererIndexPath(): string | null {
+  return rendererIndexCandidates().find(candidate => fs.existsSync(candidate)) ?? null
+}
+
+function extractRendererForFallback(indexPath: string): string {
+  const sourceDir = path.dirname(indexPath)
+  const targetDir = path.join(app.getPath('userData'), 'renderer-fallback')
+  fs.rmSync(targetDir, { recursive: true, force: true })
+  fs.mkdirSync(targetDir, { recursive: true })
+
+  for (const entry of ['index.html', 'dino.svg', 'assets']) {
+    const source = path.join(sourceDir, entry)
+    if (fs.existsSync(source)) copyPath(source, path.join(targetDir, entry))
+  }
+
+  const extractedIndex = path.join(targetDir, 'index.html')
+  if (!fs.existsSync(extractedIndex)) {
+    throw new Error(`Could not extract renderer fallback from ${sourceDir}`)
+  }
+  console.warn(`[main] Loaded renderer from extracted fallback: ${extractedIndex}`)
+  return extractedIndex
+}
+
+function copyPath(source: string, target: string): void {
+  const stat = fs.statSync(source)
+  if (stat.isDirectory()) {
+    fs.mkdirSync(target, { recursive: true })
+    for (const entry of fs.readdirSync(source)) {
+      copyPath(path.join(source, entry), path.join(target, entry))
+    }
+    return
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.copyFileSync(source, target)
+}
+
 function normalizeDevServerUrl(url: string): string {
   try {
     const parsed = new URL(url)
@@ -282,6 +368,15 @@ function normalizeDevServerUrl(url: string): string {
     return parsed.toString()
   } catch {
     return url
+  }
+}
+
+async function loadBootstrapError(win: BrowserWindow, message: string): Promise<void> {
+  if (win.isDestroyed()) return
+  try {
+    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderBootstrapErrorHtml(message))}`)
+  } catch (error) {
+    console.error(`[main] Failed to render bootstrap error: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
