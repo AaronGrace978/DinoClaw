@@ -143,6 +143,48 @@ const DESKTOP_CONTROL_KEYWORDS = [
   'move around',
   'take control',
 ]
+// Goals that actually mutate the filesystem — the agent must DO the work
+// (move/sort/delete/rename), not just claim it did.
+const FILE_ACTION_KEYWORDS = [
+  'organize',
+  'organise',
+  'clean up',
+  'cleanup',
+  'clean out',
+  'declutter',
+  'tidy',
+  'tidy up',
+  'sort',
+  'rename',
+  'move',
+  'delete',
+  'remove',
+  'empty',
+  'archive',
+  'categorize',
+  'categorise',
+  'group',
+]
+const FILE_CONTEXT_KEYWORDS = [
+  'folder',
+  'directory',
+  'downloads',
+  'download folder',
+  'desktop',
+  'documents',
+  'pictures',
+  'photos',
+  'videos',
+  'music',
+  'files',
+  'file',
+  'trash',
+  'recycle bin',
+  'screenshots',
+]
+// Tools that produce a real filesystem change. A file-management goal is not
+// complete until at least one of these has succeeded.
+const FILE_MUTATION_TOOLS: ToolName[] = ['write_file', 'delete_file', 'execute_command', 'run_script']
 const STOP_GOALS = new Set([
   'stop',
   'cancel',
@@ -987,6 +1029,7 @@ export class DinoRuntime {
         this.enableBrowserAutomationForInteractiveGoal(run, queueItem.goal)
       }
 
+      let fileTaskNudges = 0
       for (let stepIndex = queueItem.stepIndex; stepIndex < this.state.policy.maxSteps; stepIndex++) {
         this.assertRunNotCancelled(run)
         queueItem.stepIndex = stepIndex
@@ -1069,6 +1112,22 @@ export class DinoRuntime {
         const decision = parseDecision(rawDecision)
 
         if (decision.type === 'message') {
+          // Don't let Dino claim a folder is organized when it never touched a file.
+          // Nudge it to actually do the work; cap nudges so a genuinely-empty
+          // folder (nothing to move) can still finish honestly.
+          if (this.detectFileTaskIncomplete(queueItem.goal, run) && fileTaskNudges < 2) {
+            fileTaskNudges += 1
+            queueItem.messages.push(
+              { role: 'assistant', content: JSON.stringify(decision) },
+              {
+                role: 'user',
+                content:
+                  'FILE TASK INCOMPLETE: This goal requires actually changing files on disk (moving, sorting, renaming, or deleting). You have not yet run a tool that modified the filesystem. Do NOT say the task is done. First inspect the target folder with list_directory, then perform the real changes with execute_command or run_script (for example, create category folders and "mv" the files into them on Linux/macOS, or "Move-Item" on Windows), and finally verify the result with list_directory. Only return type=message after the files have actually been moved. If the folder is already empty or there is genuinely nothing to organize, say so explicitly and explain what you checked.',
+              },
+            )
+            continue
+          }
+
           const browserIncomplete = this.detectBrowserTaskIncomplete(queueItem.goal, run)
           if (browserIncomplete) {
             if (!this.browserConfig.enabled) {
@@ -1535,6 +1594,31 @@ export class DinoRuntime {
     return successful
   }
 
+  // A file-organization/cleanup goal is "incomplete" if the agent tries to
+  // declare success without ever performing (and succeeding at) a real
+  // filesystem-mutation tool. This stops Dino from claiming it organized a
+  // folder when it actually did nothing.
+  private detectFileTaskIncomplete(goal: string, run: RunRecord): boolean {
+    if (!isFileManagementGoal(goal)) return false
+    return this.getSuccessfulFileMutationTools(run).size === 0
+  }
+
+  private getSuccessfulFileMutationTools(run: RunRecord): Set<ToolName> {
+    const mutationTools = new Set<ToolName>(FILE_MUTATION_TOOLS)
+    const successful = new Set<ToolName>()
+    for (const step of run.steps) {
+      if (
+        step.kind === 'tool_result' &&
+        Boolean(step.toolName) &&
+        mutationTools.has(step.toolName as ToolName) &&
+        (step.payload?.includes('ok: true') ?? false)
+      ) {
+        successful.add(step.toolName as ToolName)
+      }
+    }
+    return successful
+  }
+
   private shouldRequireApproval(risk: string, toolName: ToolName): boolean {
     if (this.browserConfig.requireApprovalForWrites && BROWSER_MUTATION_TOOLS.includes(toolName)) {
       return true
@@ -1770,6 +1854,15 @@ function isInteractiveDesktopGoal(goal: string): boolean {
   const hasDesktopIntent = DESKTOP_CONTROL_KEYWORDS.some(keyword => lower.includes(keyword))
   const hasWebContext = WEB_CONTEXT_KEYWORDS.some(keyword => lower.includes(keyword))
   return hasDesktopIntent && !hasWebContext
+}
+
+function isFileManagementGoal(goal: string): boolean {
+  const lower = goal.toLowerCase()
+  // Don't hijack web/desktop-control goals — those have their own guards.
+  if (isInteractiveBrowserGoal(goal) || isInteractiveDesktopGoal(goal)) return false
+  const hasAction = FILE_ACTION_KEYWORDS.some(keyword => lower.includes(keyword))
+  const hasContext = FILE_CONTEXT_KEYWORDS.some(keyword => lower.includes(keyword))
+  return hasAction && hasContext
 }
 
 function buildToolArgHint(toolName: ToolName, result: ToolResult): string | null {

@@ -216,6 +216,7 @@ export function buildSystemPrompt(input: {
     '- Keep reason concise but informative.',
     '- For risky operations, explain what will happen and why.',
     '- When saving memory, choose appropriate category and importance.',
+    '- For file tasks (organize/clean up/sort/tidy/rename/move/delete a folder like Downloads or Desktop): you MUST actually perform the changes. Inspect with list_directory, then move/rename/delete using execute_command or run_script (e.g. mkdir + mv on Linux/macOS, Move-Item on Windows), then verify with list_directory. NEVER return type=message claiming a folder is organized unless you have really moved the files and confirmed it. Describing a plan is not completion.',
     '- NEVER use open_url for tasks that require posting, typing, clicking, or submitting on a website. open_url opens the system browser and hands off to the operator — it cannot automate.',
     '- For ANY web task (LinkedIn post, login, form fill, etc.): use browser_navigate first, then browser_snapshot to see the page, then browser_click/browser_fill/browser_type as needed until the action is DONE.',
     '- A web task is NOT complete until the requested action (post, submit, click) has actually been performed. Opening a URL is step 1, not completion.',
