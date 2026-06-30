@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DinoClawApi } from '../src/shared/contracts'
+import type { DinoClawApi, VoicePrepareProgress } from '../src/shared/contracts'
 
 const api: DinoClawApi = {
   getSnapshot: () => ipcRenderer.invoke('dinoclaw:getSnapshot'),
@@ -37,7 +37,14 @@ const api: DinoClawApi = {
   transcribePcm: (samples, sampleRate) => ipcRenderer.invoke('dinoclaw:transcribePcm', samples, sampleRate),
   speakText: (text) => ipcRenderer.invoke('dinoclaw:speakText', text),
   stopSpeech: () => ipcRenderer.invoke('dinoclaw:stopSpeech'),
+  prepareVoice: () => ipcRenderer.invoke('dinoclaw:prepareVoice'),
+  getVoiceStatus: () => ipcRenderer.invoke('dinoclaw:getVoiceStatus'),
   getAppVersion: () => ipcRenderer.invoke('dinoclaw:getAppVersion'),
+  onVoiceStatus: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: unknown) => callback(data as VoicePrepareProgress)
+    ipcRenderer.on('dinoclaw:voiceStatus', handler)
+    return () => ipcRenderer.removeListener('dinoclaw:voiceStatus', handler)
+  },
   getBrowserSession: () => ipcRenderer.invoke('dinoclaw:getBrowserSession'),
   clearBrowserSession: () => ipcRenderer.invoke('dinoclaw:clearBrowserSession'),
   getServiceStatus: () => ipcRenderer.invoke('dinoclaw:getServiceStatus'),

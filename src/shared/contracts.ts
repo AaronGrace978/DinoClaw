@@ -354,6 +354,15 @@ export interface BrowserConfig {
 
 /* ─── Voice / Talk Mode ─────────────────────────────────── */
 
+export type VoicePreparePhase = 'idle' | 'starting' | 'downloading' | 'loading' | 'ready' | 'error'
+
+export interface VoicePrepareProgress {
+  phase: VoicePreparePhase
+  message: string
+  progress?: number
+  file?: string
+}
+
 export interface VoiceConfig {
   /** Master voice feature toggle */
   enabled: boolean
@@ -576,7 +585,10 @@ export interface DinoClawApi {
   transcribePcm: (samples: Float32Array, sampleRate: number) => Promise<string>
   speakText: (text: string) => Promise<void>
   stopSpeech: () => Promise<void>
+  prepareVoice: () => Promise<VoicePrepareProgress>
+  getVoiceStatus: () => Promise<VoicePrepareProgress>
   getAppVersion: () => Promise<string>
+  onVoiceStatus: (callback: (status: VoicePrepareProgress) => void) => () => void
   getBrowserSession: () => Promise<BrowserSessionInfo>
   clearBrowserSession: () => Promise<void>
   getServiceStatus: () => Promise<ServiceStatus>

@@ -1881,6 +1881,25 @@ select option:checked {
   color: var(--g);
   word-break: break-all;
 }
+.voice-status-hint {
+  font-size: 11px;
+  color: var(--t2);
+  line-height: 1.4;
+}
+.voice-progress {
+  width: 100%;
+  max-width: 280px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.voice-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #00e68a, #00ffaa);
+  transition: width 0.25s ease;
+}
 .voice-panel-options {
   display: flex;
   flex-wrap: wrap;
