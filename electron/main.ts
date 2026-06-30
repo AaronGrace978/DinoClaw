@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Tray, Menu, Notification, nativeImage, session } from 'electron'
 import fs from 'node:fs'
+import { get as httpGet } from 'node:http'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
@@ -36,6 +37,13 @@ app.setPath('sessionData', sessionDataPath)
 app.commandLine.appendSwitch('disk-cache-dir', path.join(sessionDataPath, 'cache'))
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 
+// AppImage / Steam Deck: Chromium sandbox often blocks file:// and loopback loads.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('no-sandbox')
+  app.commandLine.appendSwitch('disable-gpu-sandbox')
+  app.commandLine.appendSwitch('disable-dev-shm-usage')
+}
+
 const singleInstance = app.requestSingleInstanceLock()
 if (!singleInstance) {
   app.quit()
@@ -71,6 +79,7 @@ async function createWindow(): Promise<void> {
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: !(app.isPackaged && process.platform === 'linux'),
     },
   })
 
@@ -301,31 +310,50 @@ async function loadRenderer(win: BrowserWindow, devServerUrl?: string): Promise<
 }
 
 async function loadPackagedRenderer(win: BrowserWindow): Promise<void> {
-  if (process.platform === 'linux') {
-    const url = await ensurePackagedRendererServer()
-    console.warn(`[main] Loading packaged renderer via localhost: ${url}`)
-    await win.loadURL(url)
-    return
-  }
-
   const indexPath = resolveRendererIndexPath()
   if (!indexPath) {
     throw new Error(`Production UI missing. Checked: ${rendererIndexCandidates().join(', ')}`)
   }
 
-  try {
-    await win.loadFile(indexPath)
-    return
-  } catch (error) {
-    console.error(`[main] loadFile failed for ${indexPath}: ${error instanceof Error ? error.message : String(error)}`)
+  const attempts: Array<() => Promise<void>> = [
+    async () => {
+      console.warn(`[main] Loading packaged renderer via loadFile: ${indexPath}`)
+      await win.loadFile(indexPath)
+    },
+    async () => {
+      const extractedDir = extractRendererForFallback(indexPath)
+      const extractedIndex = path.join(extractedDir, 'index.html')
+      console.warn(`[main] Loading packaged renderer from extracted copy: ${extractedIndex}`)
+      await win.loadFile(extractedIndex)
+    },
+  ]
+
+  if (process.platform === 'linux') {
+    attempts.push(async () => {
+      const url = await ensurePackagedRendererServer()
+      await verifyPackagedRendererServer(url)
+      console.warn(`[main] Loading packaged renderer via localhost: ${url}`)
+      await win.loadURL(url)
+    })
   }
 
-  if (win.isDestroyed()) {
-    throw new Error(`Renderer window was destroyed while loading ${indexPath}`)
+  let lastError: unknown
+  for (const attempt of attempts) {
+    if (win.isDestroyed()) {
+      throw new Error(`Renderer window was destroyed while loading ${indexPath}`)
+    }
+    try {
+      await attempt()
+      return
+    } catch (error) {
+      lastError = error
+      console.error(`[main] Packaged renderer attempt failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
-  const extractedDir = extractRendererForFallback(indexPath)
-  await win.loadFile(path.join(extractedDir, 'index.html'))
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Unable to load packaged renderer from ${indexPath}`)
 }
 
 function rendererIndexCandidates(): string[] {
@@ -369,6 +397,23 @@ function ensurePackagedRendererServer(): Promise<string> {
   })
 
   return packagedRendererUrlPromise
+}
+
+function verifyPackagedRendererServer(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = httpGet(url, (response) => {
+      response.resume()
+      if (response.statusCode && response.statusCode >= 200 && response.statusCode < 400) {
+        resolve()
+        return
+      }
+      reject(new Error(`Renderer server health check failed (${response.statusCode ?? 'unknown'}) for ${url}`))
+    })
+    request.on('error', reject)
+    request.setTimeout(5000, () => {
+      request.destroy(new Error(`Renderer server health check timed out for ${url}`))
+    })
+  })
 }
 
 function serveRendererFile(rendererDir: string, requestUrl: string | undefined, res: ServerResponse): void {
@@ -419,7 +464,7 @@ function extractRendererForFallback(indexPath: string): string {
   fs.rmSync(targetDir, { recursive: true, force: true })
   fs.mkdirSync(targetDir, { recursive: true })
 
-  for (const entry of ['index.html', 'dino.svg', 'assets']) {
+  for (const entry of ['index.html', 'dino.svg', 'assets', 'ort', 'whisper-models', 'link', 'link-manifest.webmanifest', 'link-sw.js']) {
     const source = path.join(sourceDir, entry)
     if (fs.existsSync(source)) copyPath(source, path.join(targetDir, entry))
   }
@@ -457,10 +502,14 @@ function normalizeDevServerUrl(url: string): string {
   }
 }
 
-async function loadBootstrapError(win: BrowserWindow, message: string): Promise<void> {
-  if (win.isDestroyed()) return
+async function loadBootstrapError(win: BrowserWindow | null, message: string): Promise<void> {
+  const target = win && !win.isDestroyed() ? win : mainWindow
+  if (!target || target.isDestroyed()) {
+    console.error(`[main] Startup error (no window to display): ${message}`)
+    return
+  }
   try {
-    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderBootstrapErrorHtml(message))}`)
+    await target.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderBootstrapErrorHtml(message))}`)
   } catch (error) {
     console.error(`[main] Failed to render bootstrap error: ${error instanceof Error ? error.message : String(error)}`)
   }
@@ -473,7 +522,7 @@ function renderBootstrapErrorHtml(message: string): string {
     '<head><meta charset="utf-8"><title>DinoClaw - Startup Error</title></head>',
     '<body style="background:#0c1118;color:#e5ebff;font-family:Segoe UI,Arial,sans-serif;padding:24px;line-height:1.45;">',
     '<h2 style="margin-top:0;">DinoClaw could not load the UI.</h2>',
-    '<p>This is usually a temporary dev-server startup race. Keep the terminal open and retry.</p>',
+    '<p>Try reinstalling from the latest release, or run from a terminal with <code>--no-sandbox</code> on Steam Deck.</p>',
     `<pre style="white-space:pre-wrap;background:#111826;padding:12px;border-radius:8px;">${escapeHtml(message)}</pre>`,
     '</body>',
     '</html>',
@@ -492,7 +541,7 @@ function delay(ms: number): Promise<void> {
 }
 
 function attachRendererDiagnostics(win: BrowserWindow): void {
-  if (app.isPackaged) return
+  if (app.isPackaged && process.platform !== 'linux') return
 
   win.webContents.on('console-message', (_event, level, message) => {
     console.log(`[renderer:${level}] ${message}`)
