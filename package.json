@@ -1,7 +1,7 @@
 {
   "name": "dinoclaw",
   "private": true,
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "AI for the people. Desktop AI agent by BostonAi.io",
   "author": "BostonAi.io <hello@bostonai.io>",
   "homepage": "https://bostonai.io",
@@ -18,10 +18,12 @@
     "dist": "npm run build && electron-builder",
     "dist:portable": "npm run build && electron-builder --win portable",
     "dist:nsis": "npm run build && electron-builder --win nsis",
-    "dist:linux": "npm run icons && npm run build && electron-builder --linux",
+    "dist:linux": "npm run icons && npm run prepare:voice-assets && npm run bundle:espeak && npm run build && electron-builder --linux",
     "dist:appimage": "npm run dist:linux",
     "icons": "node scripts/generate-icons.mjs",
     "bundle:whisper": "node scripts/bundle-whisper-model.mjs",
+    "bundle:espeak": "bash scripts/bundle-espeak-ng.sh",
+    "prepare:voice-assets": "node scripts/prepare-voice-assets.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b",
@@ -101,6 +103,13 @@
       "category": "Utility",
       "synopsis": "Desktop AI agent — local-first, free, open source",
       "description": "DinoClaw is a free desktop AI agent that runs on your machine. Missions, memory, skills, Telegram/Discord, and more.",
+      "extraResources": [
+        {
+          "from": "build/espeak-ng",
+          "to": "espeak-ng",
+          "filter": ["**/*"]
+        }
+      ],
       "desktop": {
         "entry": {
           "StartupWMClass": "DinoClaw",

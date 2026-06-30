@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { VoiceConfig } from '../shared/contracts'
 import { speakIfEnabled, stopSpeech } from '../lib/voice-speak'
+import { isRendererVoiceSupported, transcribeRendererPcm } from '../lib/voice-transcribe'
 
 const SAMPLE_RATE = 16_000
 const MIN_SAMPLES = SAMPLE_RATE * 0.35 // ~350ms minimum speech
@@ -32,8 +33,7 @@ function isDesktopApp(): boolean {
 }
 
 function canTranscribeOnDesktop(): boolean {
-  return typeof window.dinoClaw?.transcribePcm === 'function'
-    || typeof window.dinoClaw?.transcribeAudio === 'function'
+  return isRendererVoiceSupported()
 }
 
 export interface UseVoiceModeOptions {
@@ -56,7 +56,10 @@ export interface UseVoiceModeResult {
 
 async function transcribeSamples(samples: Float32Array): Promise<string> {
   const pcm = coerceFloat32Array(samples)
-  if (typeof window.dinoClaw.transcribePcm === 'function') {
+  if (isRendererVoiceSupported()) {
+    return transcribeRendererPcm(pcm, SAMPLE_RATE)
+  }
+  if (typeof window.dinoClaw?.transcribePcm === 'function') {
     const buf = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) as ArrayBuffer
     return window.dinoClaw.transcribePcm(buf, SAMPLE_RATE)
   }

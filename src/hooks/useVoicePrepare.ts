@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react'
 import type { VoicePrepareProgress } from '../shared/contracts'
+import {
+  getRendererVoiceStatus,
+  onRendererVoiceStatus,
+  prepareRendererVoice,
+} from '../lib/voice-transcribe'
 
 const IDLE: VoicePrepareProgress = {
   phase: 'idle',
-  message: 'Turn Talk Mode on to download the speech model (one-time, ~40 MB).',
+  message: 'Turn Talk Mode on to load speech.',
+}
+
+function isDesktopApp(): boolean {
+  return typeof window.dinoClaw?.getSnapshot === 'function'
 }
 
 export function useVoicePrepare(active: boolean) {
@@ -11,20 +20,17 @@ export function useVoicePrepare(active: boolean) {
   const [preparing, setPreparing] = useState(false)
 
   useEffect(() => {
-    if (!active || typeof window.dinoClaw?.prepareVoice !== 'function') return
+    if (!active || !isDesktopApp()) return
 
     let cancelled = false
     setPreparing(true)
+    setStatus(getRendererVoiceStatus())
 
-    void window.dinoClaw.getVoiceStatus?.()
-      .then((current) => { if (!cancelled) setStatus(current) })
-      .catch(() => { /* optional */ })
-
-    const unsubscribe = window.dinoClaw.onVoiceStatus?.((next) => {
+    const unsubscribe = onRendererVoiceStatus((next) => {
       if (!cancelled) setStatus(next)
     })
 
-    void window.dinoClaw.prepareVoice()
+    void prepareRendererVoice()
       .then((result) => {
         if (!cancelled) setStatus(result)
       })
@@ -42,7 +48,7 @@ export function useVoicePrepare(active: boolean) {
 
     return () => {
       cancelled = true
-      unsubscribe?.()
+      unsubscribe()
     }
   }, [active])
 

@@ -1,6 +1,9 @@
 import { type ChildProcess, spawn } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
 import { promisify } from 'node:util'
 import { execFile } from 'node:child_process'
+import { app } from 'electron'
 
 const execFileAsync = promisify(execFile)
 
@@ -15,43 +18,61 @@ async function commandExists(name: string): Promise<boolean> {
   }
 }
 
+function bundledEspeakBin(): string | null {
+  if (!app.isPackaged) return null
+  const bin = path.join(process.resourcesPath, 'espeak-ng', 'bin', 'espeak-ng')
+  return fs.existsSync(bin) ? bin : null
+}
+
+function bundledEspeakEnv(): NodeJS.ProcessEnv {
+  const libDir = path.join(process.resourcesPath, 'espeak-ng', 'lib')
+  if (!fs.existsSync(libDir)) return { ...process.env }
+  const prev = process.env.LD_LIBRARY_PATH ?? ''
+  return {
+    ...process.env,
+    LD_LIBRARY_PATH: prev ? `${libDir}:${prev}` : libDir,
+  }
+}
+
 function stopActiveSpeak(): void {
   if (!activeSpeak) return
   try { activeSpeak.kill('SIGTERM') } catch { /* already dead */ }
   activeSpeak = null
 }
 
-function spawnSpeak(cmd: string, args: string[]): Promise<void> {
+function spawnSpeak(cmd: string, args: string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
   stopActiveSpeak()
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: 'ignore' })
+    const child = spawn(cmd, args, { stdio: 'ignore', env })
     activeSpeak = child
     child.on('error', reject)
     child.on('close', (code) => {
       if (activeSpeak === child) activeSpeak = null
       if (code === 0 || code === null) resolve()
-      else reject(new Error(`${cmd} exited with code ${code}`))
+      else reject(new Error(`${path.basename(cmd)} exited with code ${code}`))
     })
   })
 }
 
 async function speakLinux(text: string): Promise<void> {
-  // Prefer engines that synthesize audio directly and block until the speech
-  // finishes (so playback is reliable and Stop actually works). espeak-ng is
-  // exactly what the README tells Steam Deck users to install. spd-say is tried
-  // only as a fallback because on SteamOS its speech-dispatcher backend often
-  // exits "successfully" while producing no sound at all — which left Dino
-  // silent even after users installed espeak-ng.
+  const args = ['-s', '165', '-v', 'en-us', text]
+
+  // Built into the AppImage — no SteamOS pacman / read-only root needed.
+  const bundled = bundledEspeakBin()
+  if (bundled) {
+    await spawnSpeak(bundled, args, bundledEspeakEnv())
+    return
+  }
+
   if (await commandExists('espeak-ng')) {
-    await spawnSpeak('espeak-ng', ['-s', '165', '-v', 'en-us', text])
+    await spawnSpeak('espeak-ng', args)
     return
   }
   if (await commandExists('espeak')) {
-    await spawnSpeak('espeak', ['-s', '165', '-v', 'en-us', text])
+    await spawnSpeak('espeak', args)
     return
   }
   if (await commandExists('spd-say')) {
-    // -w = wait until speech completes so the process stays alive (killable to Stop).
     await spawnSpeak('spd-say', ['-w', text])
     return
   }
@@ -59,9 +80,7 @@ async function speakLinux(text: string): Promise<void> {
     await spawnSpeak('bash', ['-lc', `printf '%s' ${JSON.stringify(text)} | festival --tts`])
     return
   }
-  throw new Error(
-    'No system voice found. On Steam Deck run: sudo pacman -S espeak-ng',
-  )
+  throw new Error('No voice engine found. Reinstall DinoClaw v0.5.7+ for built-in speech.')
 }
 
 async function speakMac(text: string): Promise<void> {

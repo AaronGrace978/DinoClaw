@@ -20,6 +20,10 @@ release
 
 # Bundled at build time (~40 MB); not committed
 build/whisper-models
+build/espeak-ng
+squashfs-root/
+public/whisper-models
+public/ort
 
 # Editor directories and files
 .vscode/*

@@ -51,9 +51,7 @@ export default function VoiceTalkPanel({
         <MicOff size={18} />
         <div>
           <strong>Talk Mode needs an update</strong>
-          <p>
-            This AppImage is too old for Talk Mode. Install v0.5.6+ from GitHub Releases.
-          </p>
+          <p>Install the latest DinoClaw AppImage from GitHub Releases (v0.5.7+).</p>
           <p className="voice-help-cmd">
             curl -fsSL https://raw.githubusercontent.com/AaronGrace978/DinoClaw/main/install.sh | bash
           </p>

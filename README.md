@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.5.6-00e68a?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-0.5.7-00e68a?style=flat-square" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Mac%20%7C%20Linux-333?style=flat-square" />
   <img src="https://img.shields.io/badge/by-BostonAi.io-00e68a?style=flat-square" />
@@ -105,13 +105,7 @@ npm run cli -- status            # show runtime status
 ```
 
 ### Talk Mode (voice)
-Open **Mission** → turn **Talk Mode** on → **tap mic → speak → tap again**. Built-in speech recognition (no API key; first use downloads a ~40 MB model once). Replies are spoken via **system TTS** — on Steam Deck install voice support once:
-
-```bash
-sudo pacman -S espeak-ng
-```
-
-Enable **Speak replies aloud** in Talk Mode or Settings.
+Open **Mission** → turn **Talk Mode** on → **tap mic → speak → tap again**. Voice input is local and bundled in the desktop app. On Steam Deck v0.5.7+, spoken replies are bundled too — no `pacman`, no system unlock, no runtime voice download. Enable **Speak replies aloud** in Talk Mode or Settings.
 
 ## For the Everyday Person
 

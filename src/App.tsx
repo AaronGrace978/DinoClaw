@@ -1470,8 +1470,8 @@ function App() {
                 <div className="card">
                   <h3 className="card-heading"><Mic size={14} /> Talk Mode</h3>
                   <p className="infra-desc">
-                    Tap the mic on the Mission tab to talk. Replies can be spoken aloud using your
-                    system voice (espeak-ng on Steam Deck). First speech download is ~40 MB, one-time.
+                    Tap the mic on the Mission tab to talk. Voice input and spoken replies are bundled
+                    into the AppImage on Steam Deck — no pacman, no runtime voice download.
                   </p>
                   <div className="field-stack">
                     <label className="stomp-toggle">
@@ -1501,7 +1501,7 @@ function App() {
                           void store.updateVoice({ outputEnabled: e.target.checked })
                         }}
                       />
-                      <span>Speak DinoBuddy&apos;s replies aloud (uses system TTS — install <code>espeak-ng</code> on Deck if silent)</span>
+                      <span>Speak DinoBuddy&apos;s replies aloud (built-in voice on v0.5.7+)</span>
                     </label>
                     <label className="stomp-toggle">
                       <input

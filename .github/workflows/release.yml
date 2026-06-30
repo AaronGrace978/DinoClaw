@@ -19,7 +19,8 @@ jobs:
       - run: npm ci
 
       - run: npm run icons
-      - run: node scripts/bundle-whisper-model.mjs
+      - run: node scripts/prepare-voice-assets.mjs
+      - run: bash scripts/bundle-espeak-ng.sh
       - run: npm run build
       - run: npx electron-builder --linux --publish never
 
@@ -40,6 +41,7 @@ jobs:
 
       - run: npm ci
 
+      - run: node scripts/prepare-voice-assets.mjs
       - run: npm run build
       - run: npx electron-builder --win --publish never
 
@@ -60,6 +62,7 @@ jobs:
 
       - run: npm ci
 
+      - run: node scripts/prepare-voice-assets.mjs
       - run: npm run build
       - run: npx electron-builder --mac --publish never
 

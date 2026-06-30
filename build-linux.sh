@@ -29,12 +29,19 @@ echo "[ICONS] Generating app icons from public/dino.svg..."
 npm run icons
 
 echo
+echo "[BUILD] Preparing offline voice assets for renderer (WASM, no network)..."
+npm run prepare:voice-assets
+
+echo
 echo "[BUILD] Compiling TypeScript + Vite..."
 npm run build
 
 echo
 echo "[PACK]  Bundling offline speech model (~40 MB)..."
 npm run bundle:whisper
+
+echo "[PACK]  Bundling espeak-ng for Steam Deck TTS..."
+npm run bundle:espeak
 
 echo
 echo "[PACK]  Packaging AppImage with electron-builder..."

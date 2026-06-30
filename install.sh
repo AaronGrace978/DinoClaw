@@ -354,9 +354,18 @@ log "Or find DinoClaw in your app menu (Desktop Mode on Steam Deck)."
 
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   warn "~/.local/bin is not in your PATH."
-  warn "Add this to ~/.bashrc:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+  warn "Launch directly: $INSTALL_DIR/$APPIMAGE_NAME"
+  warn "Or add to ~/.bashrc:  export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
+echo
+echo "  Launch now:"
+echo "    $INSTALL_DIR/$APPIMAGE_NAME"
+echo
+echo "  Voice on Steam Deck (v0.5.7+):"
+echo "    • Mic + spoken replies are built in — no pacman / no Wi‑Fi needed"
+echo "    • Turn on Talk Mode, tap mic, speak, tap again"
+echo "    • Enable \"Speak replies aloud\" in Talk Mode or Settings"
 echo
 echo "  Steam Deck tip: Steam → Add a Non-Steam Game → select DinoClaw."
 echo
