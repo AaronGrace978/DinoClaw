@@ -12,7 +12,7 @@ export interface VoicePrepareProgress {
 
 type WhisperPipeline = (
   audio: Float32Array,
-  options: { sampling_rate: number; language: string; task: string },
+  options: { sampling_rate: number; language?: string; task?: string },
 ) => Promise<{ text: string }>
 
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
@@ -144,10 +144,12 @@ export async function transcribeBuiltInWhisper(
 ): Promise<string> {
   if (!pcm.length) throw new Error('No audio captured.')
   const transcriber = await getWhisperPipeline()
+  // whisper-tiny.en is an English-only model. Passing `language`/`task` makes
+  // transformers.js throw ("Cannot specify task or language for an English-only
+  // model"), which previously caused EVERY transcription to fail and surface as
+  // a misleading "voice error / network" message.
   const result = await transcriber(pcm, {
     sampling_rate: sampleRate,
-    language: 'english',
-    task: 'transcribe',
   })
   const text = result.text?.trim() ?? ''
   if (!text) throw new Error('Could not make out any words. Try speaking closer to the mic.')
