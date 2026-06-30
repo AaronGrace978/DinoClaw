@@ -276,6 +276,16 @@ function App() {
   return (
     <div className="shell">
       {import.meta.env.VITE_WEB_PREVIEW === 'true' && <WebPreviewBanner />}
+      {import.meta.env.VITE_WEB_PREVIEW !== 'true' && typeof window.dinoClaw?.getSnapshot !== 'function' && (
+        <div className="web-preview-banner" role="alert">
+          <div className="web-preview-banner-inner">
+            <span>
+              <strong>Desktop bridge offline</strong> — buttons and Talk Mode will not work until you install
+              DinoClaw v0.5.13+ and launch the AppImage (not the website).
+            </span>
+          </div>
+        </div>
+      )}
       <div className="ambient-tl" />
       <div className="ambient-br" />
 

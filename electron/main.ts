@@ -66,6 +66,21 @@ app.on('second-instance', () => {
   mainWindow.focus()
 })
 
+function resolvePreloadPath(): string {
+  const candidates = [
+    path.join(__dirname, 'preload.mjs'),
+    path.join(app.getAppPath(), 'dist-electron', 'preload.mjs'),
+    path.join(process.resourcesPath, 'app.asar', 'dist-electron', 'preload.mjs'),
+  ]
+  const found = candidates.find(candidate => fs.existsSync(candidate))
+  if (!found) {
+    console.error(`[main] Preload script missing. Checked: ${candidates.join(', ')}`)
+    return path.join(__dirname, 'preload.mjs')
+  }
+  console.warn(`[main] Using preload: ${found}`)
+  return found
+}
+
 async function createWindow(): Promise<void> {
   isBootstrapping = true
   const win = new BrowserWindow({
@@ -79,10 +94,11 @@ async function createWindow(): Promise<void> {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 18 },
     webPreferences: {
-      preload: path.join(__dirname, 'preload.mjs'),
+      preload: resolvePreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: !(app.isPackaged && process.platform === 'linux'),
+      // Must stay true: preload is CJS (require("electron")) and breaks when sandbox is false.
+      sandbox: true,
     },
   })
   mainWindow = win
@@ -595,6 +611,10 @@ function delay(ms: number): Promise<void> {
 
 function attachRendererDiagnostics(win: BrowserWindow): void {
   if (app.isPackaged && process.platform !== 'linux') return
+
+  win.webContents.on('preload-error', (_event, preloadPath, error) => {
+    console.error(`[main] Preload failed (${preloadPath}): ${error.message}`)
+  })
 
   win.webContents.on('console-message', (_event, level, message) => {
     console.log(`[renderer:${level}] ${message}`)
