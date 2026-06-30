@@ -186,6 +186,11 @@ app.whenReady().then(async () => {
     runtime.updateVoiceConfig(config))
   ipcMain.handle('dinoclaw:transcribeAudio', (_e, audio: ArrayBuffer, mimeType: string) =>
     runtime.transcribeAudio(Buffer.from(audio), mimeType))
+  ipcMain.handle('dinoclaw:transcribePcm', (_e, samples: Float32Array, sampleRate: number) =>
+    runtime.transcribePcm(samples, sampleRate))
+  ipcMain.handle('dinoclaw:speakText', (_e, text: string) => runtime.speakText(text))
+  ipcMain.handle('dinoclaw:stopSpeech', () => { runtime.stopSpeech() })
+  ipcMain.handle('dinoclaw:getAppVersion', () => runtime.getAppVersion())
   ipcMain.handle('dinoclaw:getBrowserSession', () => runtime.getBrowserSessionInfo())
   ipcMain.handle('dinoclaw:clearBrowserSession', () => runtime.clearBrowserSession())
 

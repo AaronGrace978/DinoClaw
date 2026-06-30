@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.5.1-00e68a?style=flat-square" />
+  <img src="https://img.shields.io/badge/version-0.5.2-00e68a?style=flat-square" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Mac%20%7C%20Linux-333?style=flat-square" />
   <img src="https://img.shields.io/badge/by-BostonAi.io-00e68a?style=flat-square" />
@@ -105,7 +105,13 @@ npm run cli -- status            # show runtime status
 ```
 
 ### Talk Mode (voice)
-Open the **Mission** tab, flip **Talk Mode** on, and speak your mission. DinoBuddy records your mic and transcribes it locally in the app (not the broken browser speech API). For best results, add a **Groq API key** in Settings (free tier includes Whisper). Or install local Whisper: `pip install openai-whisper`. Replies can be read aloud via text-to-speech.
+Open **Mission** → turn **Talk Mode** on → **tap mic → speak → tap again**. Built-in speech recognition (no API key; first use downloads a ~40 MB model once). Replies are spoken via **system TTS** — on Steam Deck install voice support once:
+
+```bash
+sudo pacman -S espeak-ng
+```
+
+Enable **Speak replies aloud** in Talk Mode or Settings.
 
 ## For the Everyday Person
 

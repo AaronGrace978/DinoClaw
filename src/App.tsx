@@ -48,6 +48,7 @@ import { PROVIDER_DEFAULTS, OLLAMA_CLOUD_MODELS } from './shared/contracts'
 import { parseStompPathLines } from './shared/stomp-paths'
 import CreedPanel from './components/CreedPanel'
 import VoiceTalkPanel, { speakIfEnabled } from './components/VoiceTalkPanel'
+import { stopSpeech } from './lib/voice-speak'
 import WebPreviewBanner from './components/WebPreviewBanner'
 import { useDinoStore } from './store/useDinoStore'
 import './App.css'
@@ -166,7 +167,7 @@ function App() {
     const r = await store.runGoal({ goal: t })
     if (r?.ok) {
       setGoal('')
-      if (r.run.finalMessage) speakIfEnabled(store.voice, r.run.finalMessage, lastSpokenRef)
+      if (r.run.finalMessage) void speakIfEnabled(store.voice, r.run.finalMessage, lastSpokenRef)
     }
   }, [goal, store])
 
@@ -181,7 +182,7 @@ function App() {
     const finals = store.liveSteps.filter(e => e.step.kind === 'final')
     const last = finals[finals.length - 1]
     if (!last?.step.summary) return
-    speakIfEnabled(store.voice, last.step.summary, lastSpokenRef)
+    void speakIfEnabled(store.voice, last.step.summary, lastSpokenRef)
   }, [store.liveSteps, store.voice])
 
   const handleStop = async () => {
@@ -1469,8 +1470,8 @@ function App() {
                 <div className="card">
                   <h3 className="card-heading"><Mic size={14} /> Talk Mode</h3>
                   <p className="infra-desc">
-                    Hands-free voice missions on the Mission tab. The desktop app records your mic locally and transcribes
-                    speech (Groq Whisper API key recommended — free tier works — or install local <code>whisper</code> CLI).
+                    Tap the mic on the Mission tab to talk. Replies can be spoken aloud using your
+                    system voice (espeak-ng on Steam Deck). First speech download is ~40 MB, one-time.
                   </p>
                   <div className="field-stack">
                     <label className="stomp-toggle">
@@ -1496,11 +1497,11 @@ function App() {
                         checked={store.voice.outputEnabled}
                         disabled={!store.voice.enabled}
                         onChange={e => {
-                          if (!e.target.checked) window.speechSynthesis.cancel()
+                          if (!e.target.checked) stopSpeech()
                           void store.updateVoice({ outputEnabled: e.target.checked })
                         }}
                       />
-                      <span>Speak DinoBuddy&apos;s replies aloud</span>
+                      <span>Speak DinoBuddy&apos;s replies aloud (uses system TTS — install <code>espeak-ng</code> on Deck if silent)</span>
                     </label>
                     <label className="stomp-toggle">
                       <input

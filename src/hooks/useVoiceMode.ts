@@ -1,45 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { VoiceConfig } from '../shared/contracts'
+import { speakIfEnabled, stopSpeech } from '../lib/voice-speak'
 
-const SILENCE_LEVEL = 10
-const SILENCE_MS = 1400
-const MIN_SPEECH_MS = 450
+const SAMPLE_RATE = 16_000
+const MIN_SAMPLES = SAMPLE_RATE * 0.35 // ~350ms minimum speech
 
-function hasNativeTranscription(): boolean {
-  return typeof window.dinoClaw?.transcribeAudio === 'function'
+function isDesktopApp(): boolean {
+  return typeof window.dinoClaw?.getSnapshot === 'function'
 }
 
-function getBrowserSpeechRecognition(): (new () => BrowserSpeechRecognition) | null {
-  const w = window as Window & {
-    SpeechRecognition?: new () => BrowserSpeechRecognition
-    webkitSpeechRecognition?: new () => BrowserSpeechRecognition
-  }
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
-}
-
-interface BrowserSpeechRecognition {
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-  maxAlternatives: number
-  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null
-  onend: (() => void) | null
-  onerror: ((event: { error: string }) => void) | null
-  onstart: (() => void) | null
-  start: () => void
-  stop: () => void
-  abort: () => void
-}
-
-interface BrowserSpeechRecognitionEvent {
-  resultIndex: number
-  results: {
-    length: number
-    [index: number]: {
-      isFinal: boolean
-      0?: { transcript?: string }
-    }
-  }
+function canTranscribeOnDesktop(): boolean {
+  return typeof window.dinoClaw?.transcribePcm === 'function'
+    || typeof window.dinoClaw?.transcribeAudio === 'function'
 }
 
 export interface UseVoiceModeOptions {
@@ -47,33 +19,51 @@ export interface UseVoiceModeOptions {
   talkMode: boolean
   disabled?: boolean
   onFinalTranscript: (text: string) => void
-  onInterimTranscript?: (text: string) => void
 }
 
 export interface UseVoiceModeResult {
   supported: boolean
-  listening: boolean
+  needsUpdate: boolean
+  recording: boolean
   transcribing: boolean
-  interimText: string
   error: string | null
-  startListening: () => void
-  stopListening: () => void
+  toggleRecording: () => void
   speak: (text: string) => void
   stopSpeaking: () => void
 }
 
-async function transcribeBlob(blob: Blob): Promise<string> {
-  const buffer = await blob.arrayBuffer()
-  const mimeType = blob.type || 'audio/webm'
-  const text = await window.dinoClaw.transcribeAudio(buffer, mimeType)
-  return text.trim()
+async function transcribeSamples(samples: Float32Array): Promise<string> {
+  if (typeof window.dinoClaw.transcribePcm === 'function') {
+    return window.dinoClaw.transcribePcm(samples, SAMPLE_RATE)
+  }
+  const wav = encodeWav(samples, SAMPLE_RATE)
+  return window.dinoClaw.transcribeAudio(wav.buffer.slice(0) as ArrayBuffer, 'audio/wav')
 }
 
-function pickRecorderMime(): string | undefined {
-  for (const mime of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg']) {
-    if (MediaRecorder.isTypeSupported(mime)) return mime
+function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
+  const buffer = new ArrayBuffer(44 + samples.length * 2)
+  const view = new DataView(buffer)
+  const writeStr = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i))
   }
-  return undefined
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + samples.length * 2, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  writeStr(36, 'data')
+  view.setUint32(40, samples.length * 2, true)
+  for (let i = 0; i < samples.length; i += 1) {
+    const clamped = Math.max(-1, Math.min(1, samples[i] ?? 0))
+    view.setInt16(44 + i * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+  }
+  return new Uint8Array(buffer)
 }
 
 export function useVoiceMode({
@@ -81,325 +71,132 @@ export function useVoiceMode({
   talkMode,
   disabled = false,
   onFinalTranscript,
-  onInterimTranscript,
 }: UseVoiceModeOptions): UseVoiceModeResult {
-  const nativeStt = hasNativeTranscription()
-  const browserSpeech = getBrowserSpeechRecognition()
-  const supported = nativeStt || Boolean(browserSpeech)
+  const desktop = isDesktopApp()
+  const needsUpdate = desktop && !canTranscribeOnDesktop()
+  const supported = desktop ? canTranscribeOnDesktop() : false
 
-  const [listening, setListening] = useState(false)
+  const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
-  const [interimText, setInterimText] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  const wantListeningRef = useRef(false)
   const onFinalRef = useRef(onFinalTranscript)
-  const onInterimRef = useRef(onInterimTranscript)
-
-  // Native (Electron) capture refs
   const streamRef = useRef<MediaStream | null>(null)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const chunksRef = useRef<Blob[]>([])
   const audioContextRef = useRef<AudioContext | null>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const silenceTimerRef = useRef<number | null>(null)
-  const speechStartedAtRef = useRef<number | null>(null)
-  const monitorFrameRef = useRef<number | null>(null)
-
-  // Browser speech refs
-  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null)
+  const processorRef = useRef<ScriptProcessorNode | null>(null)
+  const samplesRef = useRef<number[]>([])
+  const recordingRef = useRef(false)
 
   useEffect(() => { onFinalRef.current = onFinalTranscript }, [onFinalTranscript])
-  useEffect(() => { onInterimRef.current = onInterimTranscript }, [onInterimTranscript])
 
-  const clearSilenceTimer = useCallback(() => {
-    if (silenceTimerRef.current != null) {
-      window.clearTimeout(silenceTimerRef.current)
-      silenceTimerRef.current = null
-    }
-  }, [])
-
-  const stopMonitor = useCallback(() => {
-    if (monitorFrameRef.current != null) {
-      cancelAnimationFrame(monitorFrameRef.current)
-      monitorFrameRef.current = null
-    }
-  }, [])
-
-  const cleanupNativeCapture = useCallback(() => {
-    clearSilenceTimer()
-    stopMonitor()
-    recorderRef.current?.stop()
-    recorderRef.current = null
+  const cleanupCapture = useCallback(() => {
+    processorRef.current?.disconnect()
+    processorRef.current = null
     streamRef.current?.getTracks().forEach(track => track.stop())
     streamRef.current = null
     void audioContextRef.current?.close()
     audioContextRef.current = null
-    analyserRef.current = null
-    chunksRef.current = []
-    speechStartedAtRef.current = null
-  }, [clearSilenceTimer, stopMonitor])
+    samplesRef.current = []
+    recordingRef.current = false
+    setRecording(false)
+  }, [])
 
-  const finalizeRecording = useCallback(async () => {
-    const recorder = recorderRef.current
-    if (!recorder || recorder.state === 'inactive') return
+  const stopRecordingAndTranscribe = useCallback(async () => {
+    recordingRef.current = false
+    setRecording(false)
+    processorRef.current?.disconnect()
+    processorRef.current = null
 
-    const blob = await new Promise<Blob | null>((resolve) => {
-      const chunks = chunksRef.current
-      recorder.onstop = () => {
-        resolve(chunks.length ? new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }) : null)
-      }
-      recorder.stop()
-    })
+    const raw = samplesRef.current
+    samplesRef.current = []
+    if (raw.length < MIN_SAMPLES) {
+      setError('Didn\'t catch that — tap the mic, speak, then tap again.')
+      return
+    }
 
-    chunksRef.current = []
-    recorderRef.current = null
-
-    if (!blob || blob.size < 800) return
-
+    const pcm = new Float32Array(raw)
     setTranscribing(true)
-    setInterimText('Transcribing…')
+    setError(null)
     try {
-      const text = await transcribeBlob(blob)
-      setInterimText('')
+      const text = (await transcribeSamples(pcm)).trim()
       if (text) onFinalRef.current(text)
+      else setError('Could not make out any words. Try speaking closer to the mic.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Transcription failed.')
-      setInterimText('')
     } finally {
       setTranscribing(false)
     }
   }, [])
 
-  const monitorAudioLevel = useCallback(() => {
-    const analyser = analyserRef.current
-    if (!analyser || !wantListeningRef.current) return
+  const startRecording = useCallback(async () => {
+    if (!supported || !config.enabled || !config.inputEnabled || disabled || transcribing) return
 
-    const data = new Uint8Array(analyser.frequencyBinCount)
-    analyser.getByteFrequencyData(data)
-    const level = data.reduce((sum, v) => sum + v, 0) / data.length
-    const speaking = level > SILENCE_LEVEL
-
-    if (speaking) {
-      if (!speechStartedAtRef.current) speechStartedAtRef.current = Date.now()
-      clearSilenceTimer()
-      if (!recorderRef.current || recorderRef.current.state === 'inactive') {
-        chunksRef.current = []
-        const mimeType = pickRecorderMime()
-        const recorder = mimeType
-          ? new MediaRecorder(streamRef.current!, { mimeType })
-          : new MediaRecorder(streamRef.current!)
-        recorderRef.current = recorder
-        recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) chunksRef.current.push(event.data)
-        }
-        recorder.start(250)
-        setListening(true)
-        setError(null)
-      }
-    } else if (speechStartedAtRef.current && recorderRef.current?.state === 'recording') {
-      if (silenceTimerRef.current == null) {
-        silenceTimerRef.current = window.setTimeout(() => {
-          silenceTimerRef.current = null
-          const spokeMs = speechStartedAtRef.current ? Date.now() - speechStartedAtRef.current : 0
-          speechStartedAtRef.current = null
-          if (spokeMs >= MIN_SPEECH_MS) {
-            void finalizeRecording().then(() => {
-              if (wantListeningRef.current && config.continuous && !config.pushToTalk && talkMode && !disabled) {
-                monitorFrameRef.current = requestAnimationFrame(monitorAudioLevel)
-              }
-            })
-          } else {
-            recorderRef.current?.stop()
-            recorderRef.current = null
-            chunksRef.current = []
-          }
-        }, SILENCE_MS)
-      }
-    }
-
-    monitorFrameRef.current = requestAnimationFrame(monitorAudioLevel)
-  }, [clearSilenceTimer, config.continuous, config.pushToTalk, disabled, finalizeRecording, talkMode])
-
-  const startNativeListening = useCallback(async () => {
-    if (!nativeStt || !config.enabled || !config.inputEnabled || disabled) return
-
-    wantListeningRef.current = true
     setError(null)
+    samplesRef.current = []
 
     try {
       if (!streamRef.current) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        })
         streamRef.current = stream
-        const audioContext = new AudioContext()
-        audioContextRef.current = audioContext
-        const source = audioContext.createMediaStreamSource(stream)
-        const analyser = audioContext.createAnalyser()
-        analyser.fftSize = 512
-        source.connect(analyser)
-        analyserRef.current = analyser
       }
 
-      if (config.pushToTalk) {
-        chunksRef.current = []
-        const mimeType = pickRecorderMime()
-        const recorder = mimeType
-          ? new MediaRecorder(streamRef.current, { mimeType })
-          : new MediaRecorder(streamRef.current)
-        recorderRef.current = recorder
-        recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) chunksRef.current.push(event.data)
-        }
-        recorder.start()
-        speechStartedAtRef.current = Date.now()
-        setListening(true)
-        return
-      }
+      const audioContext = audioContextRef.current ?? new AudioContext({ sampleRate: SAMPLE_RATE })
+      audioContextRef.current = audioContext
+      if (audioContext.state === 'suspended') await audioContext.resume()
 
-      stopMonitor()
-      monitorFrameRef.current = requestAnimationFrame(monitorAudioLevel)
-      setListening(true)
+      const source = audioContext.createMediaStreamSource(streamRef.current)
+      const processor = audioContext.createScriptProcessor(4096, 1, 1)
+      processor.onaudioprocess = (event) => {
+        if (!recordingRef.current) return
+        const input = event.inputBuffer.getChannelData(0)
+        samplesRef.current.push(...input)
+      }
+      source.connect(processor)
+      processor.connect(audioContext.destination)
+      processorRef.current = processor
+      recordingRef.current = true
+      setRecording(true)
     } catch (err) {
-      wantListeningRef.current = false
+      cleanupCapture()
       setError(err instanceof Error ? err.message : 'Microphone access failed.')
-      setListening(false)
     }
-  }, [config.enabled, config.inputEnabled, config.pushToTalk, disabled, monitorAudioLevel, nativeStt, stopMonitor])
+  }, [cleanupCapture, config.enabled, config.inputEnabled, disabled, supported, transcribing])
 
-  const stopNativeListening = useCallback(async () => {
-    wantListeningRef.current = false
-    setListening(false)
-    stopMonitor()
-    clearSilenceTimer()
-
-    if (config.pushToTalk && recorderRef.current?.state === 'recording') {
-      await finalizeRecording()
-    }
-
-    if (!talkMode || disabled) cleanupNativeCapture()
-  }, [cleanupNativeCapture, clearSilenceTimer, config.pushToTalk, disabled, finalizeRecording, stopMonitor, talkMode])
-
-  const startBrowserListening = useCallback(() => {
-    if (!browserSpeech || !config.enabled || !config.inputEnabled || disabled) return
-
-    wantListeningRef.current = true
-    setError(null)
-
-    if (!recognitionRef.current) {
-      const recognition = new browserSpeech()
-      recognition.lang = 'en-US'
-      recognition.interimResults = true
-      recognition.maxAlternatives = 1
-      recognition.continuous = config.continuous && !config.pushToTalk
-
-      recognition.onstart = () => {
-        setListening(true)
-        setError(null)
-      }
-
-      recognition.onresult = (event) => {
-        let interim = ''
-        let finalText = ''
-        for (let i = event.resultIndex; i < event.results.length; i += 1) {
-          const result = event.results[i]
-          const transcript = result[0]?.transcript?.trim() ?? ''
-          if (!transcript) continue
-          if (result.isFinal) finalText = `${finalText} ${transcript}`.trim()
-          else interim = `${interim} ${transcript}`.trim()
-        }
-        if (interim) {
-          setInterimText(interim)
-          onInterimRef.current?.(interim)
-        }
-        if (finalText) {
-          setInterimText('')
-          onInterimRef.current?.('')
-          onFinalRef.current(finalText)
-        }
-      }
-
-      recognition.onerror = (event) => {
-        if (event.error === 'aborted' || event.error === 'no-speech') return
-        if (event.error === 'network') {
-          setError(
-            'Browser speech recognition is unavailable in the desktop app. '
-            + 'Update to the latest DinoClaw build for local Talk Mode.',
-          )
-        } else if (event.error === 'not-allowed') {
-          setError('Microphone permission denied. Allow mic access in system settings.')
-        } else {
-          setError(`Voice error: ${event.error}`)
-        }
-        setListening(false)
-      }
-
-      recognition.onend = () => {
-        setListening(false)
-        if (wantListeningRef.current && config.continuous && !config.pushToTalk && talkMode && !disabled) {
-          window.setTimeout(() => {
-            try { recognition.start() } catch { /* already running */ }
-          }, 250)
-        }
-      }
-
-      recognitionRef.current = recognition
-    }
-
-    const recognition = recognitionRef.current
-    recognition.continuous = config.continuous && !config.pushToTalk
-    try { recognition.start() } catch { /* already running */ }
-  }, [browserSpeech, config, disabled, talkMode])
-
-  const stopBrowserListening = useCallback(() => {
-    wantListeningRef.current = false
-    recognitionRef.current?.stop()
-    setListening(false)
-  }, [])
-
-  const startListening = nativeStt ? startNativeListening : startBrowserListening
-  const stopListening = nativeStt ? stopNativeListening : stopBrowserListening
+  const toggleRecording = useCallback(() => {
+    if (recordingRef.current) void stopRecordingAndTranscribe()
+    else void startRecording()
+  }, [startRecording, stopRecordingAndTranscribe])
 
   useEffect(() => {
-    if (!supported || !config.enabled || !config.inputEnabled) {
-      void stopListening()
-      return
+    if (!talkMode || !config.enabled || !config.inputEnabled || disabled) {
+      if (recordingRef.current) void stopRecordingAndTranscribe()
+      else cleanupCapture()
     }
-    if (talkMode && !config.pushToTalk && !disabled && !transcribing) {
-      void startListening()
-      return
-    }
-    if (!talkMode) void stopListening()
-  }, [supported, config.enabled, config.inputEnabled, config.pushToTalk, talkMode, disabled, transcribing, startListening, stopListening])
+  }, [talkMode, config.enabled, config.inputEnabled, disabled, cleanupCapture, stopRecordingAndTranscribe])
 
   useEffect(() => () => {
-    wantListeningRef.current = false
-    recognitionRef.current?.abort()
-    recognitionRef.current = null
-    cleanupNativeCapture()
+    cleanupCapture()
     window.speechSynthesis.cancel()
-  }, [cleanupNativeCapture])
+  }, [cleanupCapture])
 
   const speak = useCallback((text: string) => {
     if (!config.enabled || !config.outputEnabled || !text.trim()) return
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text.trim())
-    utterance.rate = 1
-    utterance.pitch = 1
-    window.speechSynthesis.speak(utterance)
-  }, [config.enabled, config.outputEnabled])
+    void speakIfEnabled(config, text, { current: '' })
+  }, [config])
 
   const stopSpeaking = useCallback(() => {
-    window.speechSynthesis.cancel()
+    stopSpeech()
   }, [])
 
   return {
     supported,
-    listening,
+    needsUpdate,
+    recording,
     transcribing,
-    interimText,
     error,
-    startListening: () => { void startListening() },
-    stopListening: () => { void stopListening() },
+    toggleRecording,
     speak,
     stopSpeaking,
   }

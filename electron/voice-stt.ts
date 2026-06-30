@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import type { ModelSettings } from '../src/shared/contracts'
+import { transcribeBuiltInWhisper } from './voice-stt-local'
 
 const execFileAsync = promisify(execFile)
 
@@ -77,7 +78,7 @@ async function commandExists(name: string): Promise<boolean> {
   }
 }
 
-async function transcribeViaLocalWhisper(audio: Buffer, mimeType: string): Promise<string> {
+async function transcribeViaLocalWhisperCli(audio: Buffer, mimeType: string): Promise<string> {
   const ext = extensionForMime(mimeType)
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dinoclaw-voice-'))
   const inputPath = path.join(tmpDir, `clip.${ext}`)
@@ -107,6 +108,58 @@ async function transcribeViaLocalWhisper(audio: Buffer, mimeType: string): Promi
   throw new Error('local_whisper_unavailable')
 }
 
+export async function transcribePcm(
+  pcm: Float32Array,
+  sampleRate: number,
+  settings: ModelSettings,
+): Promise<string> {
+  if (!pcm.length) throw new Error('No audio captured.')
+
+  const errors: string[] = []
+  const apiKey = settings.apiKey?.trim() ?? ''
+
+  try {
+    return await transcribeBuiltInWhisper(pcm, sampleRate)
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error))
+  }
+
+  if (apiKey && settings.provider === 'groq') {
+    try {
+      const wav = encodeWav16(pcm, sampleRate)
+      const text = await transcribeViaGroq(wav, 'audio/wav', apiKey)
+      if (text) return text
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  if (apiKey && (settings.provider === 'openai-compatible' || settings.provider === 'openrouter')) {
+    try {
+      const wav = encodeWav16(pcm, sampleRate)
+      const text = await transcribeViaOpenAiCompatible(wav, 'audio/wav', settings)
+      if (text) return text
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  try {
+    const wav = encodeWav16(pcm, sampleRate)
+    return await transcribeViaLocalWhisperCli(wav, 'audio/wav')
+  } catch (error) {
+    if (error instanceof Error && error.message !== 'local_whisper_unavailable') {
+      errors.push(error.message)
+    }
+  }
+
+  throw new Error(
+    'Could not transcribe your voice. First use downloads a small speech model (~40 MB, one-time). '
+    + 'Check your internet connection, then try again. '
+    + (errors.length ? `Details: ${errors.slice(0, 2).join(' | ')}` : ''),
+  )
+}
+
 export async function transcribeSpeech(
   audio: Buffer,
   mimeType: string,
@@ -114,8 +167,11 @@ export async function transcribeSpeech(
 ): Promise<string> {
   if (!audio.length) throw new Error('No audio captured.')
 
-  const apiKey = settings.apiKey?.trim() ?? ''
+  const pcm = decodeWav16ToFloat32(audio)
+  if (pcm) return transcribePcm(pcm.samples, pcm.sampleRate, settings)
+
   const errors: string[] = []
+  const apiKey = settings.apiKey?.trim() ?? ''
 
   if (apiKey && settings.provider === 'groq') {
     try {
@@ -136,7 +192,7 @@ export async function transcribeSpeech(
   }
 
   try {
-    return await transcribeViaLocalWhisper(audio, mimeType)
+    return await transcribeViaLocalWhisperCli(audio, mimeType)
   } catch (error) {
     if (error instanceof Error && error.message === 'local_whisper_unavailable') {
       errors.push('Local whisper CLI not found.')
@@ -146,8 +202,45 @@ export async function transcribeSpeech(
   }
 
   throw new Error(
-    'Could not transcribe speech. Add a Groq API key in Settings (free tier works), '
-    + 'or install local Whisper: pip install openai-whisper. '
+    'Could not transcribe speech. Tap the mic, speak, tap again. '
+    + 'Built-in speech recognition needs internet once to download its model. '
     + (errors.length ? `Details: ${errors.join(' | ')}` : ''),
   )
+}
+
+function encodeWav16(samples: Float32Array, sampleRate: number): Buffer {
+  const buffer = Buffer.alloc(44 + samples.length * 2)
+  buffer.write('RIFF', 0)
+  buffer.writeUInt32LE(36 + samples.length * 2, 4)
+  buffer.write('WAVE', 8)
+  buffer.write('fmt ', 12)
+  buffer.writeUInt32LE(16, 16)
+  buffer.writeUInt16LE(1, 20)
+  buffer.writeUInt16LE(1, 22)
+  buffer.writeUInt32LE(sampleRate, 24)
+  buffer.writeUInt32LE(sampleRate * 2, 28)
+  buffer.writeUInt16LE(2, 32)
+  buffer.writeUInt16LE(16, 34)
+  buffer.write('data', 36)
+  buffer.writeUInt32LE(samples.length * 2, 40)
+  for (let i = 0; i < samples.length; i += 1) {
+    const clamped = Math.max(-1, Math.min(1, samples[i] ?? 0))
+    buffer.writeInt16LE(clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, 44 + i * 2)
+  }
+  return buffer
+}
+
+function decodeWav16ToFloat32(buffer: Buffer): { samples: Float32Array; sampleRate: number } | null {
+  if (buffer.length < 44 || buffer.toString('ascii', 0, 4) !== 'RIFF') return null
+  const sampleRate = buffer.readUInt32LE(24)
+  const bitsPerSample = buffer.readUInt16LE(34)
+  const numChannels = buffer.readUInt16LE(22)
+  if (bitsPerSample !== 16 || numChannels !== 1) return null
+  const dataOffset = 44
+  const sampleCount = Math.floor((buffer.length - dataOffset) / 2)
+  const samples = new Float32Array(sampleCount)
+  for (let i = 0; i < sampleCount; i += 1) {
+    samples[i] = buffer.readInt16LE(dataOffset + i * 2) / 0x8000
+  }
+  return { samples, sampleRate }
 }

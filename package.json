@@ -1,7 +1,7 @@
 {
   "name": "dinoclaw",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "AI for the people. Desktop AI agent by BostonAi.io",
   "author": "BostonAi.io <hello@bostonai.io>",
   "homepage": "https://bostonai.io",
@@ -30,6 +30,7 @@
     "dinoclaw": "./dist-electron/cli.js"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.4.2",
     "lucide-react": "^0.577.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -68,6 +69,10 @@
       "dist/**/*",
       "dist-electron/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@huggingface/transformers/**/*",
+      "node_modules/onnxruntime-node/**/*"
     ],
     "win": {
       "target": [
