@@ -18,15 +18,20 @@ async function commandExists(name: string): Promise<boolean> {
   }
 }
 
+function espeakBundleRoot(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'espeak-ng')
+  return path.join(app.getAppPath(), 'build', 'espeak-ng')
+}
+
 function bundledEspeakBin(): string | null {
-  if (!app.isPackaged) return null
-  const bin = path.join(process.resourcesPath, 'espeak-ng', 'bin', 'espeak-ng')
+  const bin = path.join(espeakBundleRoot(), 'bin', 'espeak-ng')
   return fs.existsSync(bin) ? bin : null
 }
 
 function bundledEspeakEnv(): NodeJS.ProcessEnv {
-  const libDir = path.join(process.resourcesPath, 'espeak-ng', 'lib')
-  const dataDir = path.join(process.resourcesPath, 'espeak-ng', 'share', 'espeak-ng-data')
+  const root = espeakBundleRoot()
+  const libDir = path.join(root, 'lib')
+  const dataDir = path.join(root, 'share', 'espeak-ng-data')
   const prev = process.env.LD_LIBRARY_PATH ?? ''
   const env = {
     ...process.env,
@@ -37,7 +42,7 @@ function bundledEspeakEnv(): NodeJS.ProcessEnv {
 }
 
 function bundledEspeakArgs(text: string): string[] {
-  const dataRoot = path.join(process.resourcesPath, 'espeak-ng', 'share')
+  const dataRoot = path.join(espeakBundleRoot(), 'share')
   const dataDir = path.join(dataRoot, 'espeak-ng-data')
   const args = ['-s', '165', '-v', 'en-us', text]
   return fs.existsSync(dataDir) ? [`--path=${dataRoot}`, ...args] : args
