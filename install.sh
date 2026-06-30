@@ -319,13 +319,17 @@ Comment=Desktop AI agent — local-first, free, open source
 Exec=$BIN_DIR/$LAUNCHER_NAME
 Icon=${ICON_DIR}/dinoclaw.png
 Terminal=false
-Categories=Utility;Office;
+StartupNotify=true
+Categories=Utility;Office;Network;
 StartupWMClass=DinoClaw
 Keywords=AI;Agent;Assistant;Chat;LLM;Ollama;
 EOF
 
   if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+  fi
+  if command -v kbuildsycoca5 >/dev/null 2>&1; then
+    kbuildsycoca5 --noincremental 2>/dev/null || true
   fi
 }
 
@@ -371,7 +375,9 @@ echo "    • Mic + spoken replies are built in — no pacman / no Wi‑Fi neede
 echo "    • Turn on Talk Mode, tap mic, speak, tap again"
 echo "    • Enable \"Speak replies aloud\" in Talk Mode or Settings"
 echo
-echo "  Steam Deck tip: Steam → Add a Non-Steam Game → select DinoClaw."
+echo "  Steam Deck: you MUST be in Desktop Mode (not Gaming Mode)."
+echo "  App menu → search \"DinoClaw\", or run: $BIN_DIR/$LAUNCHER_NAME"
+echo "  Gaming Mode: Steam → Add a Non-Steam Game → DinoClaw."
 echo
 
 if $DO_LAUNCH; then

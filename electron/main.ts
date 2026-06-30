@@ -54,6 +54,7 @@ const runtime = new DinoRuntime()
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
+let isBootstrapping = false
 let packagedRendererServer: Server | null = null
 let packagedRendererUrlPromise: Promise<string> | null = null
 
@@ -66,13 +67,15 @@ app.on('second-instance', () => {
 })
 
 async function createWindow(): Promise<void> {
-  mainWindow = new BrowserWindow({
+  isBootstrapping = true
+  const win = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 1080,
     minHeight: 700,
     backgroundColor: '#0c1118',
     title: 'DinoClaw',
+    show: false,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 18 },
     webPreferences: {
@@ -82,13 +85,14 @@ async function createWindow(): Promise<void> {
       sandbox: !(app.isPackaged && process.platform === 'linux'),
     },
   })
+  mainWindow = win
 
-  mainWindow.setMenuBarVisibility(false)
-  attachRendererDiagnostics(mainWindow)
-  mainWindow.on('close', (e) => {
+  win.setMenuBarVisibility(false)
+  attachRendererDiagnostics(win)
+  win.on('close', (e) => {
     if (tray && !isQuitting) {
       e.preventDefault()
-      mainWindow?.hide()
+      win.hide()
     }
   })
 
@@ -96,11 +100,18 @@ async function createWindow(): Promise<void> {
     ? (process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_RENDERER_URL || DEV_SERVER_FALLBACK)
     : undefined
   try {
-    await loadRenderer(mainWindow, devServerUrl)
+    await loadRenderer(win, devServerUrl)
+    if (!win.isDestroyed()) {
+      win.show()
+      win.focus()
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown renderer load error'
     console.error(`[main] Failed to load renderer: ${message}`)
-    await loadBootstrapError(mainWindow, message)
+    await loadBootstrapError(win, message)
+    if (!win.isDestroyed()) win.show()
+  } finally {
+    isBootstrapping = false
   }
 }
 
@@ -274,7 +285,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  if (isDaemon) return
+  if (isDaemon || isBootstrapping) return
   if (process.platform !== 'darwin') app.quit()
 })
 
@@ -315,6 +326,13 @@ async function loadPackagedRenderer(win: BrowserWindow): Promise<void> {
     throw new Error(`Production UI missing. Checked: ${rendererIndexCandidates().join(', ')}`)
   }
 
+  // Steam Deck / AppImage: file:// loads fail (ERR_FAILED) and can destroy the window
+  // before later fallbacks run. Loopback HTTP is the reliable path.
+  if (process.platform === 'linux') {
+    await loadPackagedRendererViaLocalhost(win)
+    return
+  }
+
   const attempts: Array<() => Promise<void>> = [
     async () => {
       console.warn(`[main] Loading packaged renderer via loadFile: ${indexPath}`)
@@ -328,19 +346,51 @@ async function loadPackagedRenderer(win: BrowserWindow): Promise<void> {
     },
   ]
 
-  if (process.platform === 'linux') {
-    attempts.push(async () => {
-      const url = await ensurePackagedRendererServer()
-      await verifyPackagedRendererServer(url)
-      console.warn(`[main] Loading packaged renderer via localhost: ${url}`)
-      await win.loadURL(url)
-    })
-  }
-
   let lastError: unknown
   for (const attempt of attempts) {
     if (win.isDestroyed()) {
       throw new Error(`Renderer window was destroyed while loading ${indexPath}`)
+    }
+    try {
+      await attempt()
+      return
+    } catch (error) {
+      lastError = error
+      console.error(`[main] Packaged renderer attempt failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Unable to load packaged renderer from ${indexPath}`)
+}
+
+async function loadPackagedRendererViaLocalhost(win: BrowserWindow): Promise<void> {
+  const indexPath = resolveRendererIndexPath()
+  if (!indexPath) {
+    throw new Error(`Production UI missing. Checked: ${rendererIndexCandidates().join(', ')}`)
+  }
+
+  const attempts: Array<() => Promise<void>> = [
+    async () => {
+      const url = await ensurePackagedRendererServer()
+      await verifyPackagedRendererServer(url)
+      console.warn(`[main] Loading packaged renderer via localhost: ${url}`)
+      await win.loadURL(url)
+    },
+    async () => {
+      const extractedDir = extractRendererForFallback(indexPath)
+      const url = await ensurePackagedRendererServer(extractedDir)
+      await verifyPackagedRendererServer(url)
+      console.warn(`[main] Loading extracted renderer via localhost: ${url}`)
+      await win.loadURL(url)
+    },
+  ]
+
+  let lastError: unknown
+  for (const attempt of attempts) {
+    if (win.isDestroyed()) {
+      throw new Error('Renderer window was destroyed while loading packaged UI')
     }
     try {
       await attempt()
@@ -381,21 +431,24 @@ function resolvePackagedRendererDirForServer(): string {
   return extractRendererForFallback(indexPath)
 }
 
-function ensurePackagedRendererServer(): Promise<string> {
-  if (packagedRendererUrlPromise) return packagedRendererUrlPromise
+function ensurePackagedRendererServer(rendererDir?: string): Promise<string> {
+  if (!rendererDir && packagedRendererUrlPromise) return packagedRendererUrlPromise
 
-  packagedRendererUrlPromise = new Promise((resolve, reject) => {
-    const rendererDir = resolvePackagedRendererDirForServer()
-    const server = createServer((req, res) => serveRendererFile(rendererDir, req.url, res))
+  const startServer = (): Promise<string> => new Promise((resolve, reject) => {
+    const dir = rendererDir ?? resolvePackagedRendererDirForServer()
+    const server = createServer((req, res) => serveRendererFile(dir, req.url, res))
 
     server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {
       const address = server.address() as AddressInfo
-      packagedRendererServer = server
+      if (!rendererDir) packagedRendererServer = server
       resolve(`http://127.0.0.1:${address.port}/`)
     })
   })
 
+  if (rendererDir) return startServer()
+
+  packagedRendererUrlPromise = startServer()
   return packagedRendererUrlPromise
 }
 
